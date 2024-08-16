@@ -1,0 +1,19 @@
+### cervelet
+
+.exe for intel x64 on windows OS
+
+## Creating .exe (on my computer)
+
+cd C:\Assemblage\cervelet
+nasm -f win64 C:/Assemblage/cervelet/cervelet.asm -o C:/Assemblage/cervelet/cervelet.obj
+..\GoLink.exe C:/Assemblage/cervelet/cervelet.obj /entry main /console kernel32.dll User32.dll gdi32.dll
+C:/Assemblage/cervelet/cervelet.exe
+
+## Keys (on windows window, not shell)
+A : draw portion's type
+Z : draw synapses blocks values
+E : draw loadings (default)
+R : draw retroactive states
+U : output details in shell window (id portion in constant PORTION_A_DETAILLER) (toggle)
+P : Quit
+

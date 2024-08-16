@@ -1,0 +1,53 @@
+
+
+
+############################# EN COURS
+- Remanier la structure des neurones pour :
+	- introduire la gestion des dendrites
+	- optimisation structurelle
+
+############################# A FAIRE
+- Structure cerveau
+	- déterminer les unités à séparer + liaisons entre elles
+
+- Mise en réseau
+	- recodage en C pour portabilité (+ optimisation compilateur)
+	- codage interface reseau
+	- interfacage entre processeurs différents
+	- découpage du cerveau
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+############################# FAIT
+
+- boucle principale
+- interface graphique
+- structure des neurones
+- outils de creation des neurones
+- portions particulières
+
