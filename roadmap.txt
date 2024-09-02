@@ -1,44 +1,24 @@
-
-
+Ce projet a pour objectif de créer un programme imitant le fonctionnement d'un cerveau par la modélisation extrêmement simplifiée des neurones, de leur développement, de leur fonctionnement, et de leurs interactions. Ce programme est codé en assembleur NASM x64. Au jour de la publication, son interface fait appel aux librairies Windows de Microsoft.
+Deux particularités sont envisagées :
+- intégration de mécanismes de rétroaction intrinsèque qui mettent en place la pondération des entrées (qui est à la base du fonctionnement des IA modernes), ainsi qu'une selection naturelle des sorties utiles
+- la distribution du fonctionnement du modele sur plusieurs ordinateurs en réseau local (considérant les faibles capacités de traitement des ordinateurs personnels au regard du fonctionnement d'un cerveau humain)
 
 ############################# EN COURS
-- Remanier la structure des neurones pour :
-	- introduire la gestion des dendrites
-	- optimisation structurelle
+- routines de développement
+	segments dendritiques / neurones / extensions axonales
+- routines de création de réseaux complexes
+- tests de reseaux neuronaux en quantité
+	fonctionnement / visualisation / rapidité
 
-############################# A FAIRE
-- Structure cerveau
-	- déterminer les unités à séparer + liaisons entre elles
+############################# A VENIR
+- action sur le défilement du texte / environnement
+- sortie (interne) visualisable
 
 - Mise en réseau
 	- recodage en C pour portabilité (+ optimisation compilateur)
-	- codage interface reseau
+	- codage interfacage reseau
 	- interfacage entre processeurs différents
-	- découpage du cerveau
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	- découpage du cerveau en zones
 
 
 
@@ -49,5 +29,10 @@
 - interface graphique
 - structure des neurones
 - outils de creation des neurones
-- portions particulières
-
+- portions particulières, notamment E/S
+- remanier la structure des neurones pour 3 dimensions
+- introduire la gestion des dendrites
+- optimisation structurelle
+- perception d'un texte (Le Horla)
+- déterminer les unités à séparer + liaisons entre elles
+- structure cerveau

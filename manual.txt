@@ -10,10 +10,18 @@ nasm -f win64 C:/Assemblage/cervelet/cervelet.asm -o C:/Assemblage/cervelet/cerv
 C:/Assemblage/cervelet/cervelet.exe
 
 ## Keys (on windows window, not shell)
+
 A : draw portion's type
 Z : draw synapses blocks values
 E : draw loadings (default)
 R : draw retroactive states
 U : output details in shell window (id portion in constant PORTION_A_DETAILLER) (toggle)
+
+Q : Z plane +
+W : Z plane -
+
+B : step by step mode
+N : next step
+
 P : Quit
 

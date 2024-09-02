@@ -1,4 +1,4 @@
-; ------------------------------------------------------------------------------------------------- LICENCE
+; ------------------------------------------------------------------------------------------------- GPL LICENCE
     ; Copyright (C) 2024 Philippe BLATIERE
     ;
     ; This program is free software: you can redistribute it and/or modify
@@ -16,12 +16,18 @@
 ; ------------------------------------------------------------------------------------------------- INITIALISATIONS
     bits 64
     ; default REL ?
+    ; A_FAIRE : envisager l'utilisation du prefetch L1 des portions suivantes
     ; general
         extern GetModuleHandleA                 ; Recuperer le handle du module en cours
         extern GetLastError                     ; Recuperer la derniere erreur
         extern ExitProcess                      ; Fin du processus / kernel32
     ; pour console
         extern GetStdHandle                     ; Gestionnaire de peripheriques
+
+        extern GetConsoleScreenBufferInfo
+        extern FillConsoleOutputCharacterA
+        extern SetConsoleCursorPosition         ; Positionnement du curseur
+
         extern WriteConsoleA                    ; Sortie en mode console (ANSI)
         extern ReadConsoleA                     ; Entree en mode console (ANSI)
         extern GetNumberOfConsoleInputEvents    ; Nombre d'entrees console
@@ -71,22 +77,7 @@
                 add %1, %2 ; +16xTDP
             ; ----- fin
             %endmacro
-        %macro decaler_numero_de_portion 4 ; effectuer un decalage sur le numero de portion
-                ; %1 REG/IMM fix = numero de portion
-                ; %2 REG/IMM fix = decalage sur x
-                ; %3 REG/IMM fix = decalage sur y
-                ; %4 REG mod = sortie numero modifie
-            ; ----- calculs
-                mov %4, %3
-                shl %4, BITS_POUR_X
-                add %4, %2
-                add %4, %1
-            ; ----- fin
-            %endmacro
-
-
- 
-        %macro comparer_et_jump_si_egal 3 ; comparaison et jump si egalite / A_FAIRE : Remplacer par des comparer_al_valeur_vers_dl_AVCD
+        %macro comparer_et_jump_si_egal 3 ; comparaison et jump si egalite
                 ; %1 REG fix = valeur de referenceregistre 8 bits a comparer
                 ; %2 REG/IMM fix = valeur a comparer (meme taille)
                 ; %3 LABEL = label vers lequel sauter
@@ -95,7 +86,7 @@
                 je %3
             ; ----- fin
             %endmacro
-        %macro comparer_al_valeur_vers_dl_AVCD 4
+        %macro comparer_al_valeur_vers_dl_AVCD 4 ; comparaison pour jump unique après plusieurs comparaisons
                 ; %1 REG fix = rax
                 ; %2 REG/IMM fix = valeur a comparer
                 ; %3 LABEL = rcx
@@ -106,47 +97,7 @@
                 or dl, cl
             ; ----- fin
             %endmacro
-        %macro recuperer_numero_par_decalage_FVA 3 ; recuperation d'un numero a une adresse
-                ; %1 IN = adresse
-                ; %2 IN/FIX = decalage pour numero
-                ; %3 MOD = (rax)
-            ; ----- recuperation du numero de portion
-                xor rax, rax
-                mov eax, [%1+%2]
-            ; ----- fin
-            %endmacro
-        %macro soustraction_limitee_basse_SFA 3 ; soustraction avec limite basse a 0 / A_FAIRE : Voir si possible de supprimer
-                ; %1 IN/OUT = registre valeur principale
-                ; %2 IN/FIX = registre ou valeur
-                ; %3 = (rax)
-            ; ----- nouvelle methode
-                xor rax, rax
-                sub %1, %2
-                cmovc %1, rax
-            ; ----- ancienne methode
-                ; cmp %1, %2
-                ; ja %%slba_ok_soustraction
-                ;     xor %1, %1
-                ; jmp %%slba_pas_soustraction
-                ; %%slba_ok_soustraction:
-                ;     sub %1, %2
-                ; %%slba_pas_soustraction:
-            ; ----- fin
-            %endmacro
-        %macro limitation_registre_a_word_SM 2 ; limitation de la valeur d'un registre a 0xFFFF / A_FAIRE : Voir si possible de supprimer
-                ; %1 IN/MOD = registre
-                ; %2 (rax)
-            ; ----- limitation haute
-                mov rax, 0xFFFF
-                cmp %1, rax
-                cmova %1, rax
-            ; ----- ancienne methode
-                ; cmp %1, 0xFFFF
-                ; jbe %%lraf_pas_de_limitation_haute
-                ;     mov %1, 0xFFFF
-                ; %%lraf_pas_de_limitation_haute:
-            ; ----- fin
-                %endmacro
+    ; pour évolutions
         %macro faire_evoluer_dx_dy_SSABCDMMM 9 ; faire evoluer dx et dy de 1 dans une/deux directions pseudo-aleatoire
                 ; %1 REG(N) mod = entree dx actuel / sortie nouveau dx
                 ; %2 REG(N) mod = entree dy actuel / sortie nouveau dy
@@ -253,253 +204,8 @@
                 add %2, %1
             ; fin
             %endmacro
-    ; outils specifiques
-        %macro chercher_portion_libre_FASMSTT 7
-                ; %1 REG/IMM fix = numero de portion
-                ; %2 = (rax)
-                ; %3 REG mod
-                ; %4 REG mod = sortie numero de portion
-                ; %5 REG mod = sortie adresse portion
-                ; %6 Texte : label pour jump si un numero dispo a ete trouve
-                ; %7 Texte : label pour jump si pas de numero dispo trouve
-            ; construction
-                mov %4, %1 ; numero de portion (evo par inc)
-                mov %3, NOMBRE_DE_PORTIONS ; plafond du numero de portion
-                mov rax, %1
-                adresse_from_numero %5, rax ; adresse de la portion (evo par add)
-                %%cpl_rechercher:
-                    add %5, TAILLE_DES_PORTIONS
-                    inc %4
-                    cmp %4, %3
-                    jae %7
-                    mov al, byte [%5]
-                    cmp al, TYPE_VIERGE
-                    je %6
-                jmp %%cpl_rechercher
-            ; fin
-            %endmacro
-        %macro creer_liaison_vierge_FN 2
-                ; %1 REG/IMM fix = adresse de la portion
-                ; %2 REGnum/IMM fix = numero de portion destination
-            ; creation
-                ; creer la liaison r11/r12 vers r13/r14
-                mov [%1], byte TYPE_LIAISON_NONACTIVEE
-                mov [%1+OS_LIAIS_L_4], dword 0 ; numero de liaison suivante
-                mov [%1+OS_VALBB_1], byte VALEUR_BOUTONS_STANDARD ; valeur bloc
-                mov [%1+OS_MASBB_1], byte MASSE_BOUTONS_STANDARD ; masse bloc
-                mov [%1+07], byte 0 ; N/U
-                mov [%1+OS_DESTN_4], %2d ; numero de destination
-            ; fin
-            %endmacro
-        %macro tester_retroactivite_adresse_FA 2 ; test portion adresse retroactivee (drapeau e = portion retroactivee)
-                ; %1 REG/IMM fix = adresse portion destination
-                ; %2 (rax) = type de la portion
-            ; ----- sortie
-                ; si adresse retroactivee alors drapeau e active
-            ; ----- lire le type de la destination
-                mov al, [%1]
-            ; ----- sauts si type retroactive
-                comparer_et_jump_si_egal al, TYPE_SIMPLE_NONACTIVEE_RETROACTIVE, %%tra_suite
-                comparer_et_jump_si_egal al, TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE, %%tra_suite
-                comparer_et_jump_si_egal al, TYPE_MERE_RETROACTIVE, %%tra_suite
-                ; ici le drapeau d'egalite est forcement faux
-            ; ----- fin
-                %%tra_suite:
-                %endmacro
-        %macro tester_activite_adresse 2 ; test portion adresse active ou post-active (drapeau e = portion retroactivee)
-                ; %1 IN/FIX = adresse portion destination (r11)
-                ; %2 MOD = (rax)
-            ; ----- sortie
-                ; si adresse active alors drapeau e active
-            ; ----- lire le type de la destination
-                mov al, [%1]
-            ; ----- sauts si type active
-                comparer_et_jump_si_egal al, TYPE_SIMPLE_ACTIVEE, %%ta_suite
-                comparer_et_jump_si_egal al, TYPE_SIMPLE_ACTIVEE_RETROACTIVE, %%ta_suite
-                comparer_et_jump_si_egal al, TYPE_SIMPLE_POSTACTIVEE, %%ta_suite
-                comparer_et_jump_si_egal al, TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE, %%ta_suite
-                comparer_et_jump_si_egal al, TYPE_LIAISON_ACTIVEE, %%ta_suite
-                comparer_et_jump_si_egal al, TYPE_LIAISON_POSTACTIVEE, %%ta_suite
-                ; ici le drapeau d'egalite est forcement faux
-            ; ----- fin
-                %%ta_suite:
-                %endmacro
-        %macro tester_charge 3 ; test de charge par rapport au seuil (drapeau b = seuil non atteint )
-                ; %1 IN = adresse
-                ; %2 MOD = (rax) -> charge
-                ; %3 MOD = (rcx) -> seuil
-            ; ----- charge actuelle
-                mov ax, [%1+OS_CHARG_2]
-            ; ----- seuil charge
-                mov cx, [%1+OS_SEUIL_2]
-            ; ----- test declenchement
-                cmp ax, cx
-            ; ----- fin
-                %endmacro
-    ; lois de fonctionnement
-        %macro surcharger_portion_de_destination_FFACD 5 ; surcharge d'une portion de destination
-                ; %1 IN/FIX = adresse portion actuelle (simple activee ou liaison activee)
-                ; %2 IN/FIX = adresse portion destination (simple ou mere)
-                ; %3 MOD = (rax)
-                ; %4 MOD = (rcx)
-                ; %5 MOD = (rdx)
-            ; ----- fonctionnement
-                ; pour portions : pulseur, simple, liaison ; quand le seuil est atteint
-                ; si la destination n'est pas refractaire ([%2+OS_CREFR_1]=0)
-                ; on ajoute la surcharge [%1+OS_VALBB_1]byte a [%2+OS_CHARG_2]word (avec limitation)
-            ; ----- 
-                xor rdx, rdx
-                mov dx, word [%2+OS_CHARG_2] ; charge actuelle de la destination
-                xor rcx, rcx
-                mov cl, byte [%1+OS_VALBB_1] ; surcharge a appliquer (reference incluse)
-                add rdx, rcx ; nouvelle charge (reference incluse)
-                mov cl, byte REFERENCE_BOUTONS
-                soustraction_limitee_basse_SFA rdx, rcx, (rax) ; correction charge avec limitation basse
-                limitation_registre_a_word_SM rdx, (rax) ; limitation haute
-                mov [%2+OS_CHARG_2], dx ; enregistrement de la nouvelle charge
-            ; ----- fin
-                %endmacro
-        %macro decompte_refractaire 3
-                ; %1 IN/FIX = registre contenant l'adresse d'une portion (simple ou mere)
-                ; %2 MOD = (rax)
-                ; %3 MOD = (rbx)
-            ; ------
-                mov al, [%1+OS_CREFR_1]
-                mov bl, 1
-                test al, al
-                cmovz ax, bx
-                dec al
-                mov [%1+OS_CREFR_1], al
-            ; ----- fin
-                %endmacro
-        %macro fuite_de_charge_portion 2 ; ramener progressivement la charge vers CHARGE_INITIALE
-                ; %1 IN/FIX = registre contenant l'adresse d'une portion (simple ou mere)
-                ; %2 MOD = (rax)
-            ; ----- fonctionnement
-                ; si charge > CHARGE_INITIALE : reduire charge de VITESSE_DECHARGE
-                ; si charge < CHARGE_INITIALE : augmenter charge de VITESSE_DECHARGE
-            ; ------
-                xor rax, rax
-                mov ax, [%1+OS_CHARG_2]
-                cmp ax, CHARGE_INITIALE
-                jb %%fcp_augmenter
-                ja %%fcp_reduire
-                jmp %%fcp_fin
-            ; cas ax < CHARGE_INITIALE : augmenter
-                %%fcp_augmenter:
-                add ax, VITESSE_DECHARGE
-                cmp ax, CHARGE_INITIALE
-                jbe %%fcp_ecriture
-                    mov ax, CHARGE_INITIALE
-                je %%fcp_ecriture
-            ; cas ax > CHARGE_INITIALE : reduire
-                %%fcp_reduire:
-                sub ax, VITESSE_DECHARGE
-                cmp ax, CHARGE_INITIALE
-                jae %%fcp_ecriture
-                    mov ax, CHARGE_INITIALE
-                jmp %%fcp_ecriture
-            ; ----- fin
-                %%fcp_ecriture:
-                mov [%1+OS_CHARG_2], ax
-                %%fcp_fin:
-            %endmacro
-    ; lois d'evolution
-        %macro evolution_seuil_d_activation 1 ; inactif et non utilise pour le moment
-            ; Pas d'evolution du seuil d'activation
-            %endmacro
-        %macro positiver_bloc_de_boutons 3 ; augmentation bloc d'une portion post-active suite destination retroactive
-                            ; %1 IN = adresse
-                            ; %2 MOD = (rax)
-                            ; %3 MOD = (rdx)
-                        ; ----- octet aleatoire -> dl
-                            rdtsc
-                            ; bits 8 et 4 -> 1 et 5
-                            rol al, 1
-                            mov dl, al
-                            and dl, 0b0001_0001
-                            ; bits 7 et 3 -> 2 et 6
-                            rol al, 2
-                            mov ah, al
-                            and ah, 0b0010_0010
-                            or dl, ah
-                            ; bits 6 et 2 -> 3 et 7
-                            rol al, 2
-                            mov ah, al
-                            and ah, 0b0100_0100
-                            or dl, ah
-                            ; bits 5 et 1 -> 4 et 8
-                            rol al, 2
-                            mov ah, al
-                            and ah, 0b1000_1000
-                            or dl, ah
-                        ; ----- masse du bloc de boutons
-                            mov al, [%1+OS_MASBB_1]
-                        ; ----- ne faire le travail que si al < dl
-                            cmp al, dl
-                            jae %%fin_positiver
-                            ; ici al <> 255
-                        ; ----- incrementer + enregister
-                            inc al
-                            mov [%1+OS_MASBB_1], al
-                        ; ----- valeur decalee du bloc de boutons
-                            mov al, [%1+OS_VALBB_1]
-                            cmp al, 255
-                            je %%fin_positiver
-                                inc al
-                                mov [%1+OS_VALBB_1], al
-                            %%fin_positiver:
-                        ; ----- fin
-                            %endmacro
-        %macro negativer_bloc_de_boutons 3 ; diminution bloc d'une portion non active suite destination retroactive
-                            ; %1 IN = adresse
-                            ; %2 MOD = (rax)
-                            ; %3 MOD = (rdx)
-                        ; ----- octet aleatoire -> dl
-                            rdtsc
-                            ; bits 8 et 4 -> 1 et 5
-                            rol al, 1
-                            mov dl, al
-                            and dl, 0b0001_0001
-                            ; bits 7 et 3 -> 2 et 6
-                            rol al, 2
-                            mov ah, al
-                            and ah, 0b0010_0010
-                            or dl, ah
-                            ; bits 6 et 2 -> 3 et 7
-                            rol al, 2
-                            mov ah, al
-                            and ah, 0b0100_0100
-                            or dl, ah
-                            ; bits 5 et 1 -> 4 et 8
-                            rol al, 2
-                            mov ah, al
-                            and ah, 0b1000_1000
-                            or dl, ah
-                        ; ----- masse du bloc de boutons
-                            mov al, [%1+OS_MASBB_1]
-                        ; ----- ne faire le travail que si al < dl
-                            cmp al, dl
-                            jae %%fin_negativer
-                            ; ici al <> 255
-                        ; ----- incrementer + enregister
-                            inc al
-                            mov [%1+OS_MASBB_1], al
-                        ; ----- valeur decalee du bloc de boutons
-                            mov al, [%1+OS_VALBB_1]
-                        ; ----- comparer a 0, et decrementer et enregistrer
-                            cmp al, 0
-                            je %%fin_negativer
-                                dec al
-                                mov [%1+OS_VALBB_1], al
-                            %%fin_negativer:
-                        ; ----- fin
-                            %endmacro
-        %macro pousse_de_liaison 1 ; A FAIRE ET UTILISER
-            ; une liaison se cree quand ?
-            %endmacro
     ; macros hors boucle
-        %macro make_a_call 1-*
+        %macro call_datapush_style 1-*
                 ; pre-calage eventuel de la pile
                 %if %0 % 2 == 0
                     sub rsp, 8
@@ -521,7 +227,7 @@
                     add rsp, 8
                 %endif
             %endmacro
-        %macro make_a_winapi64_style_call 1-*
+        %macro call_winapi64_style 1-*
             ; sauvegarde des registres eventuellement utilises
                 push rcx
                 push rdx
@@ -595,7 +301,7 @@
                 pop rcx
             ; fin
             %endmacro
-        %macro ligne_de_valeur 7
+        %macro ligne_de_valeur 6
             ; ----- parametres
                 ; %1 IN = handle sortie standard
                 ; %2 IN = adresse
@@ -603,202 +309,216 @@
                 ; %4 IN = registre a la bonne longueur
                 ; %5 IN = registre 64 bits associe
                 ; %6 IN = texte de presentation
-                ; %7 IN = longueur du texte de presentation
-                ; exemple : ligne_de_valeur r15, rdx, OS_CREFR_1, cx, rcx, portion_chrs_text, PORTION_CHRS_LONG
+                ; exemple : ligne_de_valeur r15, rdx, OS_CREFR_1, cx, rcx, portion_chrs_text
             ; -----
                 xor %5, %5
                 mov %4, [%2+%3]
-                make_a_winapi64_style_call WriteConsoleA, %1, %6, %7, reponse_long_ret
-                make_a_winapi64_style_call convertir, %5, nombre_text, NOMBRE_LONG
-                make_a_winapi64_style_call WriteConsoleA, %1, nombre_text, NOMBRE_LONG, reponse_long_ret
+                ; call_winapi64_style WriteConsoleA, %1, %6, %7, reponse_long_ret
+                ; call_winapi64_style convertir, %5, nombre_text, NOMBRE_LONG
+                ; call_winapi64_style WriteConsoleA, %1, nombre_text, NOMBRE_LONG, reponse_long_ret
+                call_datapush_style ecrire_ligne_3, %1, %6, %5
             %endmacro
 section .data ; ----------------------------------------------------------------------------------- PARAMETRES
-    ; dimensionnement cerveau
-        BITS_POUR_X: equ 10 ; => DIMENSION_X 1024
-            DECALAGE_X: equ 0
-            MASQUE_X: equ (1<<DECALAGE_X)*((1<<BITS_POUR_X)-1)
-            DIMENSION_X: equ (1<<BITS_POUR_X)
-        BITS_POUR_Y: equ 9 ; => DIMENSION_Y 512
-            DECALAGE_Y: equ BITS_POUR_X
-            MASQUE_Y: equ (1<<DECALAGE_Y)*((1<<BITS_POUR_Y)-1)
-            DIMENSION_Y: equ (1<<BITS_POUR_Y)
-        NOMBRE_DE_PORTIONS: equ DIMENSION_X*DIMENSION_Y
-        TAILLE_DES_PORTIONS: equ 16 ; en octets
-        SURALIGNEMENT_PORTIONS: equ 15 ; = 16-1 pour alignement sur charge (2) et liaison de liaisons (4)
-        ; tests : 2^(10+9) *2 *12 => 12+2 Mo / 350 Hz
-        ; prevoir : 2^(12+11) *2 *12 => 96+2 Mo / 45 Hz
-    ; reglages
+    ; dimensionnement
+        ; x
+        BITS_POUR_X: equ 9
+        DIMENSION_X: equ (1<<BITS_POUR_X) ; 512
+        DECALAGE_X: equ 0
+        MASQUE_X: equ (1<<DECALAGE_X)*((1<<BITS_POUR_X)-1)
+        ; y
+        BITS_POUR_Y: equ 8
+        DIMENSION_Y: equ (1<<BITS_POUR_Y) ; 256
+        DECALAGE_Y: equ BITS_POUR_X
+        MASQUE_Y: equ (1<<DECALAGE_Y)*((1<<BITS_POUR_Y)-1)
+        ; z
+        BITS_POUR_Z: equ 5
+        DIMENSION_Z: equ (1<<BITS_POUR_Z) ; 32
+        DECALAGE_Z: equ BITS_POUR_X+BITS_POUR_Y
+        MASQUE_Z: equ (1<<DECALAGE_Z)*((1<<BITS_POUR_Z)-1)
+        ;
+        FX: equ 1 ; non utilisé
+        FY: equ DIMENSION_X
+        FZ: equ DIMENSION_X*DIMENSION_Y
+        NOMBRE_DE_PORTIONS: equ DIMENSION_X*DIMENSION_Y*DIMENSION_Z
+        TAILLE_DES_PORTIONS: equ 16
+    ; reglages portions
         ; communs
-            REFERENCE_BOUTONS: equ 64 ; => Blocs RZD-64 a RZD+191
-            DUREE_REFRACTAIRE: equ 10 ; maxi 255
-        ; lecteurs
-            ; Persistance initiale = 0
-            PERSISTANCE_STANDARD: equ 255 ; maxi 255
-            VALEUR_BOUTONS_LECTEUR: equ 255 ; maxi 255
-            TAILLE_SEGMENT_STANDARD: equ 1 ; maxi 256/8=32
-        ; pulseurs
-            ; Chrono initial = 0
-            INCREMENT_PULSEURS: equ 100
-            SEUIL_CHRONO_STANDARD: equ 65_000 ; maxi 65535
-            VALEUR_BOUTONS_PULSEUR: equ REFERENCE_BOUTONS + 191 ; maxi 255
+        PORTION_ZERO: equ 0 ; portion zéro invalide = pas de portion
+        DUREE_REFRACTAIRE: equ 10 ; maxi 255 / selon longueur temporelle maxi des dendrites apicales
+        ; pulseurs / pour traitement
+        INCREMENT_PULSEURS: equ 100 ; maxi 65535
+        CHRONO_INITIAL: equ 0 ; maxi = CHRONO_MAXI
+        CHRONO_MAXI: equ 65535
         ; neurones
-            CHARGE_INITIALE: equ 512 ; VITESSE_DECHARGE-1 < ... < 65535+1-VITESSE_DECHARGE
-            ; increment par surcharge
-            SEUIL_STANDARD: equ CHARGE_INITIALE + 450 ; maxi 65535
-            VALEUR_BOUTONS_STANDARD: equ REFERENCE_BOUTONS + 80 ; maxi 255
-            MASSE_BOUTONS_STANDARD: equ 32 ; maxi 255
-            VITESSE_DECHARGE: equ 0
-        ; liaisons
-            VALEUR_BOUTONS_LIAISONS: equ REFERENCE_BOUTONS + 100 ; maxi 255
-        ; bouclages
-                ; estimation : rapide x moyen = 350 => 1 seconde
-            ; dans boucle rapide : traitement des portions
-            BOUCLAGE_RAPIDE_A_FAIRE: equ 35
-            ; dans boucle moyenne : affichages graphiques
-            BOUCLAGE_MOYEN_A_FAIRE: equ 10
-            ; dans bouclege lent : ecritures et controles
-            ; BOUCLAGE LENT : systematique sauf sur fermeture fenetre
-            PORTION_A_DETAILLER: equ 16+128*LARGEUR_DE_COUCHE
-            ; PORTION_A_DETAILLER: equ 12+10*LARGEUR_DE_COUCHE
-            ; PORTION_A_DETAILLER: equ 30+10*LARGEUR_DE_COUCHE
+        CHARGE_INVALIDE: equ -32768 ; charge invalide (word)
+        CHARGE_MINI: equ -32767 ; limite de charge basse (word) (exclusion de la charge invalide)
+        CHARGE_MAXI: equ +32767 ; limite de charge haute (word)
+        ; increment par surcharge
+        VITESSE_DECHARGE: equ 0
+    ; valeurs pour réseaux préconfigurés
+        VS_VALBB: equ 127 ; maxi 127
+        VS_MASBB: equ 255 ; maxi 255
+        VS_PSEUIL: equ 8 ; maxi 15
+        VS_BREFRC: equ 15 ; mini = durée maxi de remontée réfractaire (cumul chaine apicale de segments le plus long)
+    ; réglages bouclages et écritures
+        ; caractéristiques de l'ordi
+        FREQUENCE_MHZ: equ 2710 ; million de cycles par seconde : en Mcycles/s = cycles/us (mon ordi : 2710 c/us)
+        DUREE_DE_CYCLE_PS: equ 1024*1024/FREQUENCE_MHZ ; durée de cycle : en M.us/cycle = ps/cycle (mon ordi : 369 ps)
+        ; besoin de bouclage
+        DUREE_BOUCLE_MOYENNE_MS: equ 100 ; on sort de la boucle rapide quand on arrive à cette durée
+        DUREE_BOUCLE_LENTE_MS: equ 1000 ; on sort de la boucle lente quand on arrive à cette durée
+        ; valeurs utiles
+        NBCYCLES_BOUCLE_MOYENNE: equ 1000 * DUREE_BOUCLE_MOYENNE_MS * FREQUENCE_MHZ
+        NBCYCLES_BOUCLE_LENTE: equ 1000 * DUREE_BOUCLE_LENTE_MS * FREQUENCE_MHZ
+        ; dans bouclage moyen : retraçage + messages fenêtre
+        ; dans bouclege lent : ecritures console
+        ; BOUCLAGE LENT : systematique sauf sur fermeture fenetre
     ; constantes de types de portions
-        ; pour info - approximatif
-            ; bit 8 : capacite a la retroactivite
-            ; bit 7 : capacite a l'activite
-            ; bit 6 : emetteur simple (pulseur)
-            ; bit 5 : 
-            ; bit 4 : interface de sortie
-            ; bit 3 : retroactivite
-            ; bit 2 : postactivite
-            ; bit 1 : activite immediate
-        ; entrees
-            TYPE_ENTREE: equ                            0b0001_0000 ; fonction a definir
-            TYPE_LECTEUR: equ                           0b0011_0000
-            TYPE_PULSEUR: equ                           0b0010_0000
-        ; simple
-            TYPE_SIMPLE_NONACTIVEE: equ                 0b1100_0000
-            TYPE_SIMPLE_NONACTIVEE_RETROACTIVE: equ     0b1100_0100
-            TYPE_SIMPLE_ACTIVEE: equ                    0b1100_0011
-            TYPE_SIMPLE_ACTIVEE_RETROACTIVE: equ        0b1100_0111
-            TYPE_SIMPLE_POSTACTIVEE: equ                0b1100_0010
-            TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE: equ    0b1100_0110
-        ; mere
-            TYPE_MERE: equ                              0b1000_0000
-            TYPE_MERE_RETROACTIVE: equ                  0b1000_0100
-        ; liaison (imperativement apres les autres, et remplies dans l'ordre)
-            TYPE_LIAISON_NONACTIVEE: equ                0b0100_0000
-            TYPE_LIAISON_ACTIVEE: equ                   0b0100_0011
-            TYPE_LIAISON_POSTACTIVEE: equ               0b0100_0010
-        ; sorties
-            TYPE_SORTIE: equ                            0b0000_1000 ; fonction a definir
-        ; non exploitables
-            TYPE_VIERGE: equ                            0b0000_0000 ; (ne jamais reutiliser ; pourquoi ?)
-            TYPE_CONSECUTIF: equ                        0b1111_1111
-    ; constates de positionnement de donnees
-        OS_LIAIS_L_4:   equ 1 ; (4) valide pour liaison (liaison sur liaison)
-        OS_CHARG_2:     equ 1 ; (2) valide pour pulseur/simple/mere (charge)
-        OS_SEUIL_2:     equ 3 ; (2) valide pour simple/mere (seuil de charge)
-        OS_CREFR_1:     equ 5 ; (1) valide pour simple/mere (decompteur refractaire)
-        OS_BREFR_1:     equ 6 ; (1) valide pour simple/mere (base refractaire)
-        ; OS synapses disponibles (1)
-        OS_EXPDX_L_1:   equ 8 ; (1) valide pour simple/mere/liaison (exploration sur x)
-        OS_EXPDY_L_1:   equ 9 ; (1) valide pour simple/mere/liaison (rxploration sur y)
-        ; OS potentiel restant de synapses (2)
-        OS_EXPDX_SM_1:  equ 10 ; (1) valide pour simple/mere/liaison (exploration sur x)
-        OS_EXPDY_SM_1:  equ 11 ; (1) valide pour simple/mere/liaison (rxploration sur y)
-        OS_VALBB_1:     equ 10 ; (1) valide pour annexedelecteur/pulseur/simple/liaison (valeur du bloc de boutons)
-        OS_MASBB_1:     equ 11 ; (1) valide pour simple/liaison (masse du bloc de boutons)
-        OS_DESTN_4:     equ 12 ; (4) valide pour annexedelecteur/pulseur/simple/liaison
-        OS_LIAIS_M_4:   equ 12 ; (4) valide pour mere
-    ; constantes de fonctionnement
-        ; Effets
-            EFFET_OCTET_PLUS_LIMITE: equ    1
-            EFFET_OCTET_MOINS_LIMITE: equ   2
-    ; initialisations
-        LARGEUR_DE_COUCHE: equ DIMENSION_X
-        HAUTEUR_TOTALE: equ DIMENSION_Y
-    ; dimensions graphiques
+        TYPE_SOURCE: equ                            0b101_00_01_0 ; type source de données en mémoire
+        TYPE_LECTEUR: equ                           0b101_00_00_0 ; type lecteur
+        TYPE_PULSEUR: equ                           0b100_00_00_0 ; type pulseur
+        TYPE_SEGMENT_GERME: equ                     0b001_00_00_0 ; type dendrite figé sans dendrite amont
+        TYPE_SEGMENT_PARTIEL: equ                   0b001_01_00_0 ; type dendrite auquel il manque des dendrites
+        TYPE_SEGMENT_COMPLET: equ                   0b001_10_00_0 ; type dendrite avec toutes dendrite amont
+        TYPE_NEURONE_GERME: equ                     0b011_00_00_0 ; type neurone figé sans dendrite ni axone
+        TYPE_NEURONE_PARTIEL: equ                   0b011_01_00_0 ; type neurone auquel il manque des dendrites et/ou l'axone
+        TYPE_NEURONE_COMPLET: equ                   0b011_10_00_0 ; type neurone avec toutes dendrites et neurone
+        TYPE_EXTENSION_GERME: equ                   0b010_00_00_0 ; type axone figé sans destination ni extension
+        TYPE_EXTENSION_PARTIEL: equ                 0b010_01_00_0 ; type axone auquel il manque la destination ou l'extension
+        TYPE_EXTENSION_COMPLET: equ                 0b010_10_00_0 ; type axone avec destination et extension
+    ; masques or, and, xor T3 E2 S2 A1
+        MASQUE_TYPE_Txxx: equ       0b111_00_00_0
+        MASQUE_TYPE_TExx: equ       0b111_11_00_0
+        MASQUE_TYPE_xxxA: equ       0b000_00_00_1
+        MASQUE_TYPE_xxxA_X: equ     0b111_11_11_0
+    ; positionnement de donnees / offsets
+        ; offsets structurels
+        OS_TYPEVSA_1:   equ 0 ; offset du type/evolution/sous-type/activation
+        OS_SEGNS_4:     equ 12 ; offset du numero de segment ou neurone suivant
+        OS_EXTAX_4:     equ 12 ; offset du numero de portion suivante
+        OS_NCACT_1:     equ 5 ; offset niveau / compteur d'activité
+        OS_DCEVO_1:     equ 6 ; offset de décompte d'evolution A_FAIRE : définition précise du rôle de ce champs
+        ; offset développements neurone
+        OS_ORIENT_1:    equ 6 ; offset orientation des développements
+        OS_PRAYO_1:     equ 7 ; offset puissance de segments dendritiques rayonnants
+        OS_PPLAN_1:     equ 8 ; offset puissance de segments dendritiques planaires
+        OS_PAPIC_1:     equ 9 ; offset puissance de segments dendritiques apicaux
+        OS_PPANI_1:     equ 10 ; offset puissance de segments dendritiques paniers
+        OS_PAXON_1:     equ 11 ; offset puissance d'extensions axonales
+        ; offset développements segments/extensions
+        OS_PSYNA_2:     equ 9 ; offset potentiel synaptique restant
+        OS_PRSEG_1:     equ 11 ; offset potentiel de segments restants
+        OS_PREXT_1:     equ 11 ; offset potentiel d'extensions restantes
+        ; offsets charges
+        OS_BSYNM_1:     equ 3 ; offset de la masse du bloc de boutons synaptiques
+        OS_BSYNV_1:     equ 4 ; offset de la valeur du bloc de boutons synaptiques
+        OS_DESTN_4:     equ 7 ; offset du numero de portion de destination
+        OS_CHARG0_2:    equ 1 ; offset charge 0 en cours
+        OS_CHARG1_2:    equ 3 ; offset charge 1 stockée
+        OS_CHARG2_2:    equ 7 ; offset charge 2 stockée
+        OS_SEUIL_1:     equ 3 ; offset de la puissance du seuil de charge
+        OS_CREFR_1:     equ 4 ; offset du (dé-)compteur réfractaire
+        OS_BREFR_1:     equ 5 ; offset de la base réfractaire
+        ; offsets lecteur
+        OS_INDEX_2:     equ 1 ; offset de l'index du segment à lire
+        OS_NMBIT_1:     equ 3 ; offset de numéro de bit à lire
+        OS_PERSA_1:     equ 5 ; offset de la persistance actuelle
+        OS_PERSB_1:     equ 6 ; offset de la base de persistance
+        OS_PAMEM_4:     equ 12 ; offset du numéro de portion des paramètres d'accès mémoire
+        ; offsets accès mémoire
+        OS_ADDRS_8:     equ 1 ; offset de l'adresse de base
+        OS_LGSEG_1:     equ 9 ; offset de la largeur des segments (en octets / 8 maxi)
+        OS_NBSEG_2:     equ 10 ; offset du nombre de segments
+    ; initialisations graphiques
+        ; dimensions graphiques
         LARGEUR_FENETRE: equ DIMENSION_X
         HAUTEUR_FENETRE: equ DIMENSION_Y
+        ; paramètres de codage mémoire / graphique
         NOMBRE_OCTET_PAR_POINT: equ 3
         COMPLEMENT_LIGNE_DWORD: equ ((LARGEUR_FENETRE*NOMBRE_OCTET_PAR_POINT*8+7)/8) % 4
-    ; messages et console
-        message_0_text: db 'Saisir un texte :', 10
-        MESSAGE_0_LONG: equ $ - message_0_text
-        message_1_text: db 'Handle de base : '
-        MESSAGE_1_LONG: equ $ - message_1_text
-        message_2_text: db 'Handle de drawing : '
-        MESSAGE_2_LONG: equ $ - message_2_text
-        message_3_text: db 'Handle de DIB : '
-        MESSAGE_3_LONG: equ $ - message_3_text
-        message_4_text: db 'Adresse de DIB : '
-        MESSAGE_4_LONG: equ $ - message_4_text
-    ; messages de portions
-        ; ----- type de portion
-            portion_type_simple_text: db '#################### Type simple : '
-                PORTION_TYPE_SIMPLE_LONG: equ $ - portion_type_simple_text
-            portion_type_mere_text: db '#################### Type mere : '
-                PORTION_TYPE_MERE_LONG: equ $ - portion_type_mere_text
-        ; ----- communs
-            portion_numr_text: db 'Numero de la portion : '
-                PORTION_NUMR_LONG: equ $ - portion_numr_text
-            portion_type_text: db 'Type de portion : '
-                PORTION_TYPE_LONG: equ $ - portion_type_text
-            portion_chrg_text: db 'Charge actuelle : '
-                PORTION_CHRG_LONG: equ $ - portion_chrg_text
-            portion_chrs_text: db 'Seuil charge : '
-                PORTION_CHRS_LONG: equ $ - portion_chrs_text
-            portion_cref_text: db 'Compteur refractaire : '
-                PORTION_CREF_LONG: equ $ - portion_cref_text
-            portion_bref_text: db 'Base refractaire : '
-                PORTION_BREF_LONG: equ $ - portion_bref_text
-            portion_blcv_text: db 'Valeur du bloc de boutons : '
-                PORTION_BLCV_LONG: equ $ - portion_blcv_text
-            portion_blcp_text: db 'Masse du bloc de boutons : '
-                PORTION_BLCP_LONG: equ $ - portion_blcp_text
-            portion_dest_text: db 'Portion de destination : '
-                PORTION_DEST_LONG: equ $ - portion_dest_text
-            portion_lias_text: db 'Portion de liaison : '
-                PORTION_LIAS_LONG: equ $ - portion_lias_text
-        ; ----- specifiques lecteurs
-            portion_adrs_text: db 'Adresse source : '
-                PORTION_ADRS_LONG: equ $ - portion_adrs_text
-            portion_nseg_text: db 'Nombre de segments : '
-                PORTION_NSEG_LONG: equ $ - portion_nseg_text
-            portion_tseg_text: db 'Taille des segments : '
-                PORTION_TSEG_LONG: equ $ - portion_tseg_text
-            portion_idxl_text: db 'Index de lecture : '
-                PORTION_IDXL_LONG: equ $ - portion_idxl_text
-            portion_prsb_text: db 'Persistance de base : '
-                PORTION_PRSB_LONG: equ $ - portion_prsb_text
-            portion_bitl_text: db 'Numero de bit a lire : '
-                PORTION_BITL_LONG: equ $ - portion_bitl_text
-        ; ----- specifiques pulseurs
-            portion_chro_text: db 'Chrono actuel : '
-                PORTION_CHRO_LONG: equ $ - portion_chro_text
-            portion_chrl_text: db 'Limite chrono : '
-                PORTION_CHRL_LONG: equ $ - portion_chrl_text
-        ; ----- speciaux
-            portion_nonu_text: db 'Non utilise : '
-                PORTION_NONU_LONG: equ $ - portion_nonu_text
-    ; autres messages
-        interligne_text: db '----------------------------', 10
-        INTERLIGNE_LONG: equ $ - interligne_text
-        personalise_text: db '>>> On est passe ici <<<', 10
-        PERSONALISE_LONG: equ $ - personalise_text
+        ; offsets couleurs
+        ROUG:   equ 2
+        VERT:   equ 1
+        BLEU:   equ 0
+        ; dimensions viseur
+        VISEUR_INT: equ 3
+        VISEUR_EXT: equ 10
+
+    ; textes de messages console
+        LONGUEUR_LIGNES: equ 40 ; 20 minimum pour accepter les nombres jusqu'à 64 bits / 254 maxi
+        texte_a_ecrire: db LONGUEUR_LIGNES dup ('?'), 0x0A
+        texte_de_test: db 'Ceci est un test : ', 0
+        texte_vide: db '/', 0
+        ; à propos de la fenêtre
+        app_instance: db 'Handle process winapi : ', 0
+        drawing_handle: db 'Handle de drawing : ', 0
+        DIB_handle: db 'Handle de DIB : ', 0
+        DIB_address: db 'Adresse de DIB : ', 0
+        ; textes communs
+        texte_numero_de_boucle: db 'Numero de boucle longue : ', 0
+        texte_duree_de_boucle: db 'Duree de boucle sur potions : ', 0
+        ; textes commun de détails
+        portion_numr_text: db 'Numero de la portion : ', 0
+        texte_position_x: db 'Abscisse x : ', 0
+        texte_position_y: db 'Ordonnee y : ', 0
+        texte_position_z: db 'Profondeur z : ', 0
+        ; détail portions
+        portion_type_text: db 'Type de portion : ', 0
+        portion_chrg_text: db 'Charge actuelle : ', 0
+        portion_chrs_text: db 'Seuil charge : ', 0
+        portion_cref_text: db 'Compteur refractaire : ', 0
+        portion_bref_text: db 'Base refractaire : ', 0
+        portion_blcv_text: db 'Valeur du bloc de boutons : ', 0
+        portion_blcp_text: db 'Masse du bloc de boutons : ', 0
+        portion_dest_text: db 'Portion de destination : ', 0
+        portion_lias_text: db 'Portion de liaison : ', 0
+        portion_ntac_text: db 'Niveau temporel d activite : ', 0
+        portion_devo_text: db 'Décompte d evolution : ', 0
+        ; specifiques accès mémoire
+        portion_adrs_text: db 'Adresse source : ', 0
+        portion_tseg_text: db 'Taille des segments : ', 0
+        portion_nseg_text: db 'Nombre de segments : ', 0
+        ; specifiques lecteurs
+        portion_idxl_text: db 'Index de lecture : ', 0
+        portion_bitl_text: db 'Numero de bit a lire : ', 0
+        portion_prsa_text: db 'Persistance actuelle : ', 0
+        portion_prsb_text: db 'Persistance de base : ', 0
+        portion_pamm_text: db 'Portion d accès mémoire : ', 0
+        ; specifiques pulseurs
+        portion_chro_text: db 'Chrono actuel : ', 0
+        portion_chrl_text: db 'Limite chrono : ', 0
+        ; specifiques segments / extensions
+        portion_segs_text: db 'Segment suivant : ', 0
+        portion_psyn_text: db 'Potentiel synaptique restant : ', 0
+        portion_pseg_text: db 'Potentiel segments restants : ', 0
+        portion_pext_text: db 'Potentiel extensions restantes : ', 0
+        ; spécifiques neurones
+        portion_ornt_text: db 'Orientation developpements : ', 0
+        portion_pray_text: db 'Potentiel rayonnant : ', 0
+        portion_ppla_text: db 'Potentiel planaire : ', 0
+        portion_papi_text: db 'Potentiel apical : ', 0
+        portion_ppan_text: db 'Potentiel panier : ', 0
+        portion_paxo_text: db 'Potentiel axonal : ', 0
+        ; spécifiques extensions
+        portion_eaxo_text: db 'Extension axonale : ', 0
+        ; speciaux
+        interparagraphes_text: db LONGUEUR_LIGNES dup ('#'), 0
+        interligne_text: db '-----', 0
+        portion_nonu_text: db 'Non utilise : ', 0
+        personalise_text: db '>>> On est passe ici <<<', 0
         nombre_text: db 24 dup ('.')
         NOMBRE_LONG: equ $ - nombre_text
         REPONSE_LONG_MAX: equ 12
-    ; pour fenetre
-        windowClassName: db 'ClasseDeFenetre', 0
-        WINDOWCLASSNAME_LONG: equ $ - windowClassName
-        windowName: db 'FenetreDeTracage', 0
-        WINDOWNAME_LONG: equ $ - windowName
+        message_0_text: db 'Saisir un texte :', 10
+        MESSAGE_0_LONG: equ $ - message_0_text
+    ; fenetre windows
+        windowClassName: db 'Classe de fenetre', 0
+        windowName: db 'Fenetre de tracage', 0
         NOM_FENETRE_A0: db 'Types de portions', 0
         NOM_FENETRE_Z1: db 'Valeurs du bloc de boutons', 0
         NOM_FENETRE_E2: db 'Charges et chronos', 0
         NOM_FENETRE_R3: db 'Activation et retro-activation', 0
-    ; pour lecture du fichier
+    ; lecture du fichier
         nom_de_fichier: db '.\textealire.txt', 0
         NOMBRE_A_LIRE: equ 52736 ; 65535 maxi
 ; ------------------------------------------------------------------------------------------------- CONSTANTES WINAPI
@@ -855,52 +575,68 @@ section .data ; ----------------------------------------------------------------
         VK_ESCAPE: equ 0x1B
 
 section .bss ; ------------------------------------------------------------------------------------ RESERVATIONS MEMOIRE
-    ; pour utilitaires et console
+    ; moteur
+        ; pour cerveau
+        align 64 ; est-ce vraiment utile ?
+        portions: times NOMBRE_DE_PORTIONS resb TAILLE_DES_PORTIONS
+        ; pour boucles exterieures
+        bouclage_rapide_actuel: resq 1
+        debut_bouclage_rapide: resq 1
+        bouclage_rapide_en_cours: resq 1
+        bouclage_moyen_actuel: resq 1
+        debut_bouclage_moyen: resq 1
+        bouclage_lent_actuel: resq 1
+        mode_pas_a_pas: resb 1
+        ; vitesse
+        dureeDeTraitement: resq 1
+        lenteur: resb 1
+        ; pour lecture fichier
+        Filehandle: resq 1
+        contenu_du_fichier: resw NOMBRE_A_LIRE
+        pointeur_entree: resq 1
+    ; interface
+        ; divers
+        modeTracage: resb 1
+        visualize_x: resq 1
+        visualize_y: resq 1
+        visualize_z: resq 1
+        detailConsole: resb 1
+
+
+            positionCurseur: resw 2
+            csbi: resb 22
+            written: resd 1
+
+
+        ; pour utilitaires et console
         reponse_text: resb REPONSE_LONG_MAX
         input_record: resw 64 ; 2/...
         reponse_long_ret: resd 1 ; nombre de caracteres ecrits/lus ou d'evenements console/clavier
-    ; pour boucles exterieures
-        bouclage_rapide_actuel: resq 1
-        bouclage_rapide_en_cours: resq 1
-        bouclage_moyen_actuel: resq 1
-        bouclage_lent_actuel: resq 1
-    ; pour cerveau
-        align 16
-        resb SURALIGNEMENT_PORTIONS ; calage optimal sur les acces le plus frequents superiaurs a un octet
-        portions: times NOMBRE_DE_PORTIONS resb TAILLE_DES_PORTIONS
-    ; process principal
+    ; fenetre windows
+        ; process principal
         Instance: resq 1
-    ; pour classe de fenetre
+        ; pour classe de fenetre
         OurWindowclass: resb 80 ; 4/4/8/4/4/8/8/8/8/8/8/8 (in)
-            ; OurWindowclass=cbSize(4)/style(4)/lpfnWndProc(8)/cbClsExtra(4)/cbWndExtra(4)
-            ; hInstance(8)/hIcon(8)/hCursor(8)/hbrBackground(8)/lpszMenuName(8)/lpszClassName(8)/hIconSm(8)
+        ; OurWindowclass=cbSize(4)/style(4)/lpfnWndProc(8)/cbClsExtra(4)/cbWndExtra(4)
+        ; hInstance(8)/hIcon(8)/hCursor(8)/hbrBackground(8)/lpszMenuName(8)/lpszClassName(8)/hIconSm(8)
         ClassAtom: resq 1
-    ; pour fenetre
+        ; pour fenetre
         Windowhandle: resq 1
         WindowMessage: resq 44 ; 8/4/8/8/4/4+4/4
-            ; WindowMessage=hwnd(8)/message(4)/wParam(8)/lParam(8)/time(4)/pt(4+4)/lPrivate(4)
+        ; WindowMessage=hwnd(8)/message(4)/wParam(8)/lParam(8)/time(4)/pt(4+4)/lPrivate(4)
         rectDef: resd 4 ;
-    ; pour draw context
+        ; pour draw context
         PaintStruct: resb 72 ; 8/4/4+4+4+4/4/4/8+8+8+8/4? (out)
-            ; PaintStruct=hdc(8)/fErase(4)/rcPaintx1(4)/rcPainty1(4)/rcPaintx2(4)/rcPainty2(4)
-            ; fRestore(4)/fIncUpdate(4)/rgbReserved(8)/rgbReserved(8)/rgbReserved(8)/rgbReserved(8)/Padding?(4)
+        ; PaintStruct=hdc(8)/fErase(4)/rcPaintx1(4)/rcPainty1(4)/rcPaintx2(4)/rcPainty2(4)
+        ; fRestore(4)/fIncUpdate(4)/rgbReserved(8)/rgbReserved(8)/rgbReserved(8)/rgbReserved(8)/Padding?(4)
         DrawingCtxHandle: resq 1
         DrawingCtxHandle2: resq 1
-    ; pour tracage
+        ; pour tracage
         BitmapHandle2: resq 1
         OldBitmapHandle2: resq 1
         bitMapInfos: resb 40 ; 4/4/4/2/2/4/4/4/4/4/4 (in)
         pBitDataAdress: resq 1
         pBitDataHandle: resq 1
-    ; divers
-        modeTracage: resb 1
-        detailConsole: resb 1
-        dureeDeTraitement: resq 1
-        lenteur: resb 1
-    ; pour lecture fichier
-        Filehandle: resq 1
-        contenu_du_fichier: resw NOMBRE_A_LIRE
-        pointeur_entree: resq 1
 section .text ; ----------------------------------------------------------------------------------- DEBUT DU CODE
     global main
     main:
@@ -986,8 +722,11 @@ section .text ; ----------------------------------------------------------------
             mov dword [bitMapInfos + 36 ], 0                        ; biClrImportant    DWORD / 4
         ; mode de tracage et texte en console
             mov byte [modeTracage], 2
+            mov qword [visualize_x], 50
+            mov qword [visualize_y], 50
+            mov qword [visualize_z], 0
+            mov byte [mode_pas_a_pas], 0
             mov byte [detailConsole], 0
-            mov byte [lenteur], 0
 ; ------------------------------------------------------------------------------------------------- LECTURE DU FICHIER D'ENTREES
         ; ouverture du fichier
             lea rcx, [nom_de_fichier] ;     LPCSTR                  lpFileName
@@ -1021,486 +760,376 @@ section .text ; ----------------------------------------------------------------
             add rsp, SHADOW_SPACE_SIZE
 
 ; ------------------------------------------------------------------------------------------------- INITIALISATION DU CERVEAU
+    ; =============================================== CREATIONS PAR RESEAUX
 
-    ; =============================================== VARIABLES D ENTREE
+        ; --------------- pulseur
+            call_datapush_style sub_creer_portion_pulseur_4, \
+            40+50*FY+0*FZ, VS_PSEUIL,  127,     45+50*FY+0*FZ
+            ; Numero,      PuissSeuil, ValBloc, Dest
+        ; --------------- réseau de segments dendritiques
+            call_datapush_style sub_creer_reseau, \
+            50+50*FY+0*FZ, TYPE_SEGMENT_COMPLET, 49+50*FY+0*FZ, 80,  40,  5,  5
+            ; Suivant(N),  Type                  NumP           n/X  n/Y n/Z Pas
+        ; --------------- réseau de neurones
+            call_datapush_style sub_creer_reseau, \
+            51+50*FY+0*FZ, TYPE_NEURONE_COMPLET, 50+50*FY+0*FZ, 80,  40,  5,  5
+            ; suivant(E),  Type                  NumP           n/X  n/Y n/Z Pas
+        ; --------------- réseau d'extensions axonales
+            call_datapush_style sub_creer_reseau, \
+            54+50*FY+0*FZ, 0,         TYPE_EXTENSION_COMPLET, 51+50*FY+0*FZ, 80,  40,  5,  5
+            ; Dest,        Suivant(E) Type                    NumP           n/X  n/Y n/Z Pas
 
-        ; make_a_call lgn_variable_in, adr=1, TYPE_OCTET
-        ; A utiliser par le paquet de lecture de texte, au travers de la variable Idx
-        ; Elle sera (plus tard) modifiee par le cerveau lui-meme (par 2 neurones - et +)
-
-    ; =============================================== VARIABLES DE SORTIE
-
-        ; TYPE_SORTIE
-        ; make_a_call sub_creer_portion_sortie, adr=LARGEUR_DE_COUCHE-2, Charge(1/2), EffetDeSortie(3), Adresse(4/5/6/7/8/9/10/11)
-        ; modifie par l'effet d'un bloc de boutons sur la charge
-        ; retombe directement a la valeur de reference apres realisation de l'effet (selon la charge ?)
-
-    ; =============================================== TOUTES NEURONES INACTIVES
-        make_a_call res_base_de_meres,     100*LARGEUR_DE_COUCHE,             4, DIMENSION_X/2, DIMENSION_Y/2
-        ; make_a_call res_base_de_simples,   DIMENSION_X/2, 8, DIMENSION_X/2, DIMENSION_Y/1
-    ; =============================================== LECTURE DU TEXTE
-        lea r10, [contenu_du_fichier] ; adresse des donnees
-        ;                                         Num             Adr      NbSeg     Idx Ht           Dest
-        make_a_call pqt_lecture_std_GD, 10+10*LARGEUR_DE_COUCHE, r10, NOMBRE_A_LIRE, 0, 50, 30+10*LARGEUR_DE_COUCHE
-        ; Arguments :                  NumeroDePortion / NombreALHorizontale / NombreALaVerticale / PortionDeDestination
-        make_a_call pqt_simples_std_GD, 30+10*LARGEUR_DE_COUCHE, 16, 50, 50+10*LARGEUR_DE_COUCHE
-        ; make_a_call pqt_simples_std_GD, 50+10*LARGEUR_DE_COUCHE, 16, 100, 70+10*LARGEUR_DE_COUCHE
-        ; Rajouter la prise en compte d'une variable dans idx ? comment ?
-    ; =============================================== ESSAIS D'IA AVEC AUTO-APPRENTISSAGE
-        ; make_a_call pqt_identification, 59*LARGEUR_DE_COUCHE+10+20, 8, 256, 60*LARGEUR_DE_COUCHE+10+30
-        ; make_a_call sgt_vrt_simples_std_GD, 60*LARGEUR_DE_COUCHE+10+30, 256, 60*LARGEUR_DE_COUCHE+10+40
-    ; =============================================== TESTS UNITAIRES
-        make_a_call sub_creer_portion_pulseur, 10+128*LARGEUR_DE_COUCHE, SEUIL_CHRONO_STANDARD, VALEUR_BOUTONS_PULSEUR, 16+128*LARGEUR_DE_COUCHE
-        ; make_a_call sub_creer_portion_pulseur, 10+132*LARGEUR_DE_COUCHE, SEUIL_CHRONO_STANDARD, VALEUR_BOUTONS_PULSEUR, 16+132*LARGEUR_DE_COUCHE
-        ; make_a_call sub_creer_portion_pulseur, 10+136*LARGEUR_DE_COUCHE, SEUIL_CHRONO_STANDARD, VALEUR_BOUTONS_PULSEUR, 16+136*LARGEUR_DE_COUCHE
-        ; make_a_call sub_creer_portion_pulseur, 10+140*LARGEUR_DE_COUCHE, SEUIL_CHRONO_STANDARD, VALEUR_BOUTONS_PULSEUR, 16+140*LARGEUR_DE_COUCHE
-        ; make_a_call sub_creer_portion_mere, LARGEUR_DE_COUCHE*200+120, CHARGE_INITIALE, SEUIL_STANDARD, DUREE_REFRACTAIRE, LARGEUR_DE_COUCHE*200+130
-        ; make_a_call sub_creer_portion_liaison, LARGEUR_DE_COUCHE*200+130, VALEUR_BOUTONS_STANDARD, MASSE_BOUTONS_STANDARD, LARGEUR_DE_COUCHE*200+140, 0
-        ; make_a_call sub_creer_portion_simple, LARGEUR_DE_COUCHE*200+140, CHARGE_INITIALE, SEUIL_STANDARD, DUREE_REFRACTAIRE, VALEUR_BOUTONS_STANDARD, MASSE_BOUTONS_STANDARD, LARGEUR_DE_COUCHE*200+150
+    ; =============================================== CREATIONS A L'UNITE
+        ; --------------- source de données
+            lea rax, [contenu_du_fichier]
+            call_datapush_style sub_creer_portion_datasource_4, \
+            1+1*FY+0*FZ, rax,     1,               NOMBRE_A_LIRE
+            ; Numero,    Adresse, LongueurElement, NombreDElements
+        ; --------------- lecteur
+            call_datapush_style sub_creer_portion_lecteur_7, \
+            10+10*FY, 0,         0,      127,     10,      1+1*FY+0*FZ,   30+10*FY
+            ; Numero, IndexLect, NumBit, ValBloc, Persist, PortionSource, Destination
+        ; --------------- pulseur
+            call_datapush_style sub_creer_portion_pulseur_4, \
+            10+20*FY, 11,         127,     20+20*FY
+            ; Numero, PuissSeuil, ValBloc, Dest
+        ; --------------- segment dendritique
+            call_datapush_style sub_creer_segment_dendritique_7, \
+            TYPE_SEGMENT_COMPLET, 20+20*FY, 0,       0,      0,           0,             30+20*FY
+            ; Type,               Numero,   NivTemp, DecEvo, SynaptDispo, PotSegRestant, SegSuivant
+        ; --------------- neurone
+            call_datapush_style sub_creer_portion_neurone_10, \
+            TYPE_NEURONE_COMPLET, 30+20*FY, 10,         10,      0,    0,     0,    0,    0,    40+20*FY
+            ; Type,               Numero,   PuissSeuil, BaseRef, PRay, PPlan, PApi, PPan, PAxo, ExtAxo
+        ; --------------- extension axonale
+            call_datapush_style sub_creer_extension_axonale_8, \
+            TYPE_EXTENSION_COMPLET, 40+20*FY, 0,     0,     0,       50+20*FY,    0,             0
+            ; Type,                 Numero,   MasBB, ValBB, NivTemp, Destination, PotAxoRestant, ExtSuivante
     ; =============================================== FIN CREATIONS
 ; ------------------------------------------------------------------------------------------------- ANNONCES
-        make_a_winapi64_style_call GetStdHandle, STD_OUTPUT_HANDLE
+        call_winapi64_style GetStdHandle, STD_OUTPUT_HANDLE
         mov r15, rax
-    ; Interligne
-        make_a_winapi64_style_call WriteConsoleA, r15, interligne_text, INTERLIGNE_LONG, reponse_long_ret
-    ; Texte de lecture
-        make_a_winapi64_style_call WriteConsoleA, r15, contenu_du_fichier, 450, reponse_long_ret ; -> NOMBRE_A_LIRE au lieu de 450
-    ; Interligne
-        make_a_winapi64_style_call WriteConsoleA, r15, interligne_text, INTERLIGNE_LONG, reponse_long_ret
-    ; Instance de l'application
-        make_a_winapi64_style_call WriteConsoleA, r15, message_1_text, MESSAGE_1_LONG, reponse_long_ret
-        make_a_winapi64_style_call convertir, qword [Instance], nombre_text, NOMBRE_LONG
-        make_a_winapi64_style_call WriteConsoleA, r15, nombre_text, NOMBRE_LONG, reponse_long_ret
-    ; Atome de classe de fenetre
-        make_a_winapi64_style_call WriteConsoleA, r15, windowClassName, WINDOWCLASSNAME_LONG, reponse_long_ret
-        make_a_winapi64_style_call convertir, qword [ClassAtom], nombre_text, NOMBRE_LONG
-        make_a_winapi64_style_call WriteConsoleA, r15, nombre_text, NOMBRE_LONG, reponse_long_ret
-    ; Handle de la fenetre 
-        make_a_winapi64_style_call WriteConsoleA, r15, windowName, WINDOWNAME_LONG, reponse_long_ret
-        make_a_winapi64_style_call convertir, qword [Windowhandle], nombre_text, NOMBRE_LONG
-        make_a_winapi64_style_call WriteConsoleA, r15, nombre_text, NOMBRE_LONG, reponse_long_ret
-    ; Interligne
-        make_a_winapi64_style_call WriteConsoleA, r15, interligne_text, INTERLIGNE_LONG, reponse_long_ret
-
+        call_datapush_style ecrire_ligne_3, r15, interparagraphes_text, -1 ;                  interligne
+        call_datapush_style ecrire_ligne_3, r15, contenu_du_fichier, -1 ;               texte de lecture
+        call_datapush_style ecrire_ligne_3, r15, interligne_text, -1 ;                  interligne
+        call_datapush_style ecrire_ligne_3, r15, app_instance, qword [Instance] ;     instance de l'application
+        call_datapush_style ecrire_ligne_3, r15, windowClassName, qword [ClassAtom] ;   atome de classe de fenetre
+        call_datapush_style ecrire_ligne_3, r15, windowName, qword [Windowhandle] ;     handle de la fenetre 
+        call_datapush_style ecrire_ligne_3, r15, interligne_text, -1 ;                  interligne
 ; ------------------------------------------------------------------------------------------------- BOUCLAGES AVANT
     mov qword [bouclage_lent_actuel], 0
-    bouclage_lent: ; Boucle lente pour ecrire des infos et choisir de sortir
-        mov qword [bouclage_moyen_actuel], BOUCLAGE_MOYEN_A_FAIRE
-        bouclage_moyen: ; Boucle moyenne pour redessiner regulierement
-            mov rax, BOUCLAGE_RAPIDE_A_FAIRE
-            ; temporisation
-            mov cl, [lenteur]
-            cmp cl, 23
-            jbe bouclage_moyen_inchange
-                sub cl, 23
-                shr rax, cl
-                or rax, 1
-            bouclage_moyen_inchange:
-            mov qword [bouclage_rapide_actuel], rax
-            mov qword [bouclage_rapide_en_cours], rax
-            bouclage_rapide: ; Boucle rapide pour arriver a 1/10 secondes environ
+    bouclage_lent: ; boucle lente pour ecrire des infos et choisir de sortir
+        ; initialisation boucle rapide
+        xor rax, rax
+        rdtsc ; -> edx:eax
+        shl rdx, 32
+        or rdx, rax ; timestamp condensé
+        mov [debut_bouclage_moyen], rdx ; stockage timestamp pour durée boucles moyennes
+        bouclage_moyen: ; boucle moyenne pour redessiner regulierement
+            ; initialisation serie de bouclages rapides
+            xor rax, rax
+            rdtsc ; -> edx:eax
+            shl rdx, 32
+            or rdx, rax ; timestamp condensé
+            mov [debut_bouclage_rapide], rdx ; stockage timestamp pour durée boucle rapide
+            bouclage_rapide:
                 ; initialisation calcul de la duree du bouclage sur portions
                 xor rax, rax
                 rdtsc ; -> edx:eax
                 shl rdx, 32
-                or rax, rdx
-                ; stockage time stamp initial
-                ; et pre-alignement pile pour push r8
-                push rax
-                ; initialisation bouclage sur portions
-                mov r8, 0
+                or rdx, rax ; timestamp condensé
+                ;
+                push rdx ; stockage timestamp initial et pre-alignement pile pour push r8
+                mov r8, 0 ; initialisation bouclage sur portions
                 bouclage_portions:
                     push r8
 ; -------------------------------------------------------------------------------------------- TRAITEMENT PORTION r8
-                    ; adresse r9 et aiguillage
-                        ; calcul adresse portion a traiter
-                        adresse_from_numero r9, r8
-                        ; recuperation du numero de portion
-                        pop r8
-                        ; recuperation du type de portion
-                        mov al, byte [r9]
-                        ; re-sauvegarde du numero de portion
-                        push r8
+                    ; adresse r9
+                        adresse_from_numero r9, r8 ; calcul adresse portion a traiter
+                        mov r8, [rsp] ; récuperation du numero de portion déjà sauvegardé
+                        ; aiguillage
+                        mov al, [r9+OS_TYPEVSA_1] ; récuperation du type de portion
+                        and al, MASQUE_TYPE_TExx ; isolement du type + état d'évolution
                         ; saut vers traitement concerne
-                        comparer_et_jump_si_egal al, TYPE_SIMPLE_NONACTIVEE,               portion_simple_nonactivee
-                        comparer_et_jump_si_egal al, TYPE_SIMPLE_NONACTIVEE_RETROACTIVE,   portion_simple_nonactivee_retroactive
-                        comparer_et_jump_si_egal al, TYPE_SIMPLE_POSTACTIVEE,              portion_simple_postactivee
-                        comparer_et_jump_si_egal al, TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE,  portion_simple_postactivee_retroactive
-                        comparer_et_jump_si_egal al, TYPE_LIAISON_NONACTIVEE,              portion_liaison_nonactivee
-                        comparer_et_jump_si_egal al, TYPE_LIAISON_POSTACTIVEE,             portion_liaison_postactivee
-                        comparer_et_jump_si_egal al, TYPE_LIAISON_ACTIVEE,                 portion_liaison_activee
-                        comparer_et_jump_si_egal al, TYPE_MERE,                            portion_mere
-                        comparer_et_jump_si_egal al, TYPE_MERE_RETROACTIVE,                portion_mere_retroactive
-                        comparer_et_jump_si_egal al, TYPE_PULSEUR,                         portion_pulseur
-                        comparer_et_jump_si_egal al, TYPE_LECTEUR,                         portion_lecteur
-                        ; ne pas traiter les portions TYPE_CONSECUTIF
+                        ; A_FAIRE : réorganiser les tests selon la fréquence d'apparition du cas
+                        comparer_et_jump_si_egal al, TYPE_SEGMENT_GERME,                    portion_segment_germe
+                        comparer_et_jump_si_egal al, TYPE_SEGMENT_PARTIEL,                  portion_segment_partiel
+                        comparer_et_jump_si_egal al, TYPE_SEGMENT_COMPLET,                  portion_segment_complet
+                        comparer_et_jump_si_egal al, TYPE_NEURONE_GERME,                    portion_neurone_germe
+                        comparer_et_jump_si_egal al, TYPE_NEURONE_PARTIEL,                  portion_neurone_partiel
+                        comparer_et_jump_si_egal al, TYPE_NEURONE_COMPLET,                  portion_neurone_complet
+                        comparer_et_jump_si_egal al, TYPE_EXTENSION_GERME,                  portion_extension_germe
+                        comparer_et_jump_si_egal al, TYPE_EXTENSION_PARTIEL,                portion_extension_partiel
+                        comparer_et_jump_si_egal al, TYPE_EXTENSION_COMPLET,                portion_extension_complet
+                        comparer_et_jump_si_egal al, TYPE_LECTEUR,                          portion_lecteur
+                        comparer_et_jump_si_egal al, TYPE_PULSEUR,                          portion_pulseur
                         ; ne pas traiter les portions de type 0
                         jmp fin_traitement
 
+                    ; portions segments (dendrites)
+                    portion_segment_germe:
+                        ; A_FAIRE : coder le passage en mode partiel éventuel
+                        jmp fin_traitement
+                    portion_segment_partiel:
+                        ; A_FAIRE : coder la création de la dendrite antecedentes (même type)
+                        ; A_FAIRE : conditionner tout ça à la vitesse de développement (?)
+                        ; A_FAIRE : coder le passage en mode complet
+                    portion_segment_complet:
+                        and [r9+OS_TYPEVSA_1], byte MASQUE_TYPE_xxxA_X ; enlever la rétro-activité le cas échéant
+                        xor rax, rax
+                        mov eax, [r9+OS_SEGNS_4] ; numero de segment/neurone suivant
+                        test eax, eax ; PORTION_ZERO ?
+                        jz psc_isole ; aller au cas d'un segment qui a perdu son segment/neurone aval
+                            adresse_from_numero rdx, rax ; adresse du suivant
+                            mov al, [rdx+OS_TYPEVSA_1] ; type complet du suivant
+                            and al, MASQUE_TYPE_xxxA ; bit de retro-activité du suivant
+                            or byte [r9+OS_TYPEVSA_1], al ; l'appliquer au type actuel
+                            ; glissement des charges vers bx
+                            mov bx, [r9+OS_CHARG0_2] ; charge en cours
+                            mov [r9+OS_CHARG0_2], word 0 ; charge en cours = 0
+                            mov ax, [r9+OS_CHARG1_2] ; charge 1
+                            cmp ax, CHARGE_INVALIDE
+                            je psc_appliquer_surcharge ; bx = charge 0 ; charge en cours = 0 ; pas de glissement
+                            mov [r9+OS_CHARG1_2], bx ; glissement charge 0 -> charge 1
+                            mov bx, ax
+                            mov ax, [r9+OS_CHARG2_2] ; charge 2
+                            cmp ax, CHARGE_INVALIDE
+                            je psc_appliquer_surcharge ; bx = charge 1 ; charge en cours = 0 ; glissement 0->1 fait
+                            mov [r9+OS_CHARG2_2], bx ; glissement charge 1 -> charge 2
+                            mov bx, ax
+                            ; ... suite ; bx = charge 2 ; charge en cours = 0 ; glissement 1->2 fait
+                            psc_appliquer_surcharge:
+                            ; application surcharge
+                            movsx ebx, bx ; charge à appliquer (word signé -> dword signé)
+                            movsx ecx, word [rdx+OS_CHARG0_2] ; charge actuelle du suivant (word signé -> dword signé)
+                            add ecx, ebx ; ajouter les charges
+                            ; limitation de la charge avant enregistrement
+                            mov eax, CHARGE_MINI
+                            cmp ecx, eax
+                            cmovl ecx, eax ; limiter ecx à la valeur minimale d'un word signé (excepté -32768 charge non valide)
+                            mov eax, CHARGE_MAXI
+                            cmp ecx, eax
+                            cmovg ecx, eax ; limiter ecx à la valeur maximale d'un word signé
+                            ; enregistrer la nouvelle charge
+                            mov [rdx+OS_CHARG0_2], cx
+                            ; fin
+                            jmp fin_traitement
+                        psc_isole:
+                            ; A_FAIRE : cas d'un segment qui n'a pas de neurone à alimenter : détruire ?
+                            jmp fin_traitement
+                    ; portions neurone
+                    portion_neurone_germe:
+                        ; A_FAIRE : coder le passage en mode partiel éventuel
+                        jmp fin_traitement
+                    portion_neurone_partiel:
+                        ; A_FAIRE : coder la création des dendrites initiales
+                        ; A_FAIRE : coder la création de l'axone initiale
+                        ; A_FAIRE : conditionner tout ça à la vitesse de développement (?)
+                        ; A_FAIRE : coder le passage en mode complet
+                    portion_neurone_complet:
+                        and [r9+OS_TYPEVSA_1], byte MASQUE_TYPE_xxxA_X ; enlever la rétro-activité le cas échéant
+                        mov al, [r9+OS_CREFR_1] ; decompte réfractaire en cours
+                        test al, al ; tester si al<>0
+                        jnz pnc_refractaire ; aller au traitement du cas réfractaire
+                            mov ax, [r9+OS_CHARG0_2] ; charge actuelle (word signé -32767 à 32767)
+                            mov cl, [r9+OS_SEUIL_1] ; puissance de seuil avec décalage (maxi 15)
+                            mov edx, 1
+                            shl edx, cl
+                            dec edx ; seuil calculé (0 à 32767)
+                            cmp ax, dx ; tester si le seuil n'est pas atteint
+                            jl pnc_seuil_non_atteint ; aller au traitement du cas du seuil non atteint
+                                mov al, [r9+OS_BREFR_1] ; récupérer la base réfractaire
+                                mov [r9+OS_CREFR_1], al ; lancer la refractarité
+                                or [r9+OS_TYPEVSA_1], byte MASQUE_TYPE_xxxA ; mettre la rétro-activité
+                                xor rax, rax
+                                mov eax, [r9+OS_EXTAX_4] ; portion de l'extension axonale
+                                test eax, eax ; PORTION_ZERO ?
+                                jz fin_traitement ; aller à la fin du traitement
+                                    adresse_from_numero rdx, rax ; calculer l'adresse de la destination
+                                    or [rdx+OS_TYPEVSA_1], byte MASQUE_TYPE_xxxA ; activer la destination
+                                    jmp fin_traitement ; fin
+                        pnc_refractaire:
+                            ; al est forcément positif en arrivant
+                            dec al
+                            mov [r9+OS_CREFR_1], al
+                            cmp al, 0
+                            jne fin_traitement
+                            mov [r9+OS_CHARG0_2], word 0
+                            jmp fin_traitement
+                        pnc_seuil_non_atteint:
+                            ; ax est la charge actuelle = word signé de -32767 à 32767
+                            sub ax, VITESSE_DECHARGE
+                            mov bx, 0
+                            cmp ax, 0
+                            cmovl ax, bx
+                            jmp fin_traitement
+                    ; portions extensions (axonales)
+                    portion_extension_germe:
+                        ; A_FAIRE : coder le passage en mode partiel éventuel
+                        jmp fin_traitement
+                    portion_extension_partiel:
+                        ; A_FAIRE : coder la recherche de destination + réalisation du lien
+                        ; A_FAIRE : coder la création de l'extension suivante
+                        ; A_FAIRE : conditionner tout ça à la vitesse de développement (?)
+                        ; A_FAIRE : coder le passage en mode complet
+                    portion_extension_complet:
+                        mov rdx, 0 ; initialiser l'adresse de la destination à 0
+                        test byte [r9+OS_TYPEVSA_1], MASQUE_TYPE_xxxA ; tester l'activité actuelle
+                        jz pec_incrementer_seulement
+                            and byte [r9+OS_TYPEVSA_1], MASQUE_TYPE_xxxA_X ; se desactiver
+                            xor rax, rax
+                            mov eax, [r9+OS_EXTAX_4] ; portion de l'extension axonale suivante
+                            test eax, eax ; NEURONE_ZERO ?
+                            jz pec_pas_de_suivante
+                                adresse_from_numero rcx, rax ; adresse de l'extension axonale suivante
+                                or [rcx+OS_TYPEVSA_1], byte MASQUE_TYPE_xxxA ; activer l'extension axonale suivante
+                            pec_pas_de_suivante:
+                            xor rax, rax
+                            mov eax, [r9+OS_DESTN_4] ; segment de destination
+                            test eax, eax ; NEURONE_ZERO ?
+                            jz pec_retroaction
+                                adresse_from_numero rdx, rax ; adresse de la destination
+                                mov byte [r9+OS_NCACT_1], 1 ; initier le compteur
+                                ; surcharge segment destination
+                                movsx ecx, word [rdx+OS_CHARG0_2] ; charge actuelle destination (word signé -> dword signé)
+                                movsx eax, byte [r9+OS_BSYNV_1] ; valeur du bloc de boutons (byte signé -> dword signé)
+                                add ecx, eax ; ajouter les charges du bloc de boutons
+                                ; limitation de la charge avant enregistrement
+                                mov eax, CHARGE_MINI
+                                cmp ecx, eax
+                                cmovl ecx, eax ; limiter ecx à la valeur minimale d'un word signé (excepté -32768 charge non valide)
+                                mov eax, CHARGE_MAXI
+                                cmp ecx, eax
+                                cmovg ecx, eax ; limiter ecx à la valeur maximale d'un word signé
+                                ; enregistrer la nouvelle charge
+                                mov [rdx+OS_CHARG0_2], cx
+                                jmp pec_retroaction
+                        pec_incrementer_seulement:
+                            mov cl, [r9+OS_NCACT_1] ; compteur d'activité actuel
+                            test cl, cl
+                            jz pec_retroaction
+                                inc cl
+                        pec_retroaction:
+                        test rdx, rdx ; l'adresse n'a pas été définie / pas de destination ?
+                        jz fin_traitement
+                            test byte [rdx+OS_TYPEVSA_1], MASQUE_TYPE_xxxA ; destination non rétro-active ?
+                            jz fin_traitement
+                                ; A_FAIRE : Conditionner la variation à un test aléatoire au-dessus de la masse
+                                ; jxx pec_desactiver_cpt
+                                    mov bl, [r9+OS_BSYNV_1] ; valeur du bloc de boutons (byte signé)
+                                    mov cx, bx ; mise en réserve de la valeur du bloc de boutons
+                                    mov ax, [r9+OS_NCACT_1] ; compteur d'activité actuel
+                                    test byte [rdx+OS_NCACT_1], al ; différent du niveau d'activité de la destination ?
+                                    jz pec_negativer
+                                        add bl, 1 ; incrémenter la valeur du bloc de boutons
+                                        jmp pec_affectation_et_masse
+                                    pec_negativer:
+                                        sub bl, 1 ; décrémenter la valeur du bloc de boutons
+                                    pec_affectation_et_masse:
+                                    cmovo bx, cx ; bornage à la valeur précédente si on dépasse la capacité
+                                    mov [r9+OS_BSYNV_1], bl ; enregistrer résultat
+                                    ; modification de la masse du bloc de boutons
+                                    mov bl, [r9+OS_BSYNM_1] ; masse du bloc de boutons (byte non signé)
+                                    mov cl, bl ; mise en réserve de la masse du bloc de boutons
+                                    add bl, 1 ; incrémenter la valeur du bloc de boutons
+                                    cmovc bx, cx ; plafonnement à la valeur précédente
+                                    mov [r9+OS_BSYNM_1], bl
+                                pec_desactiver_cpt:
+                                mov byte [r9+OS_NCACT_1], 1 ; desactiver le compteur
+                                jmp fin_traitement
                     ; portions speciales
                     portion_lecteur:
-                        ; ----- adresse memoire a lire
-                        mov r11, qword [r9+1] ; adresse de base
-                        xor r12, r12
-                        mov r12b, byte [r9+11] ; taille des segments (maxi 8)
                         xor rax, rax
-                        mov ax, word [r9+TAILLE_DES_PORTIONS+1] ; index de lecture
-                        ; RAJOUTER ICI LA VARIABLE DE POSITION DE LA TETE (RELATIF)
-                        ; ET BOUCLER SUR MAXI NOMBRE_A_LIRE
-                        mul r12d ; => r12d:eax ?
-                        and rax, 0x00ffffff ; effacement de la partie haute de rax
-                        add r11, rax ; -> adresse de base a lire
-                        ; ----- lecture du bit de donnee
-                        mov rax, qword [r11] ; contenu du segment (plus le suite jusqu'a 8 octets)
-                        xor rcx, rcx
-                        mov cl, byte [r9+TAILLE_DES_PORTIONS+4] ; numero de bit a lire
-                        inc cl
-                        shr rax, cl ; calage sur premier bit a lire
-                        ; ----- surcharge destination
-                        jnc suite1_pl ; on n'active pas la destination si bit lu est 0
-                            xor r12, r12
-                            mov r12d, dword [r9+TAILLE_DES_PORTIONS+8] ; portion destination
-                            cmp r12d, 0
-                            je suite1_pl ; si pas de destination, on ne surcharge rien
-                                adresse_from_numero r13, r12 ; adresse destination
-                                mov al, [r13+OS_CREFR_1]
-                                test al, al ; destination refractaire ?
-                                jnz suite1_pl
-
-                                    ; normalement :
-                                    ; surcharger_portion_de_destination_FFACD r9+TAILLE_DES_PORTIONS, r13, (rax), (rcx), (rdx)
-                                    ; ICI JE TRICHE CAR JE N'AI PAS FAIT CORRESPONDRE LES OFFSETS DU LECTEUR ET DES PORTIONS
-                                    ; OFFSET DANS LE LECTEUR = 5 alors que OS_VALBB_1 = 10 => -5
-                                    ; ATTENTION : OS_VALBB_1 n'est lui déjà valable que pour un neurone avec une destination (pas en recherche)
-                                    surcharger_portion_de_destination_FFACD r9+TAILLE_DES_PORTIONS-5, r13, (rax), (rcx), (rdx)
-
-                        suite1_pl:
-                        ; ----- persistance
-                        mov r11b, byte [r9+TAILLE_DES_PORTIONS+3] ; persistance restante
-                        cmp r11b, 0
-                        jne suite2_pl
-                            mov r11b, byte [r9+TAILLE_DES_PORTIONS+6]
-                            mov ax, word [r9+TAILLE_DES_PORTIONS+1] ; index de lecture
-                            inc ax ; augmenter l'index de lecture (recup r13)
-                            cmp ax, word [r9+9] ; comparer au nombre de segments a lire
-                            jne suite3_pl
-                                xor ax, ax
-                            suite3_pl:
-                            mov [r9+TAILLE_DES_PORTIONS+1], ax
-                        suite2_pl:
-                            dec r11b
-                            mov [r9+TAILLE_DES_PORTIONS+3], r11b ; persistance restante
-                            jmp fin_traitement
-
+                        mov eax, [r9+OS_PAMEM_4] ; portion des paramètres de l'accès mémoire
+                        test eax, eax ; PORTION_ZERO ?
+                        jz fin_traitement
+                            adresse_from_numero r11, rax ; r11 = adresse des paramètres des données à lire
+                            xor rax, rax
+                            mov eax, dword [r9+OS_DESTN_4] ; portion destination
+                            test eax, eax ; PORTION_ZERO ?
+                            jz fin_traitement
+                                adresse_from_numero r15, rax ; r15 = adresse de la destination
+                                mov r13, [r11+OS_ADDRS_8] ; r13 = adresse de base des données
+                                movzx rdx, byte [r11+OS_LGSEG_1] ; largeur des segments en octets (maxi 8)
+                                mov r10w, word [r9+OS_INDEX_2] ; r10w = index de lecture
+                                movzx eax, r10w
+                                ; calcul de l'adresse de base à lire
+                                ; A_FAIRE ? ajouter une variable de position de tête relatif et boucler sur maxi nombre à lire
+                                mul edx ; => edx:eax (?)
+                                and rax, 0x00ffffff ; effacement de la partie haute de rax (car maxi possible = 65535*8)
+                                add r13, rax ; -> adresse de base à lire
+                                ; lecture du bit de donnee
+                                mov rax, qword [r13] ; contenu du segment (plus le suite jusqu'a 8 octets)
+                                mov cl, byte [r9+OS_NMBIT_1] ; numero de bit a lire (0 à 63)
+                                shr rax, cl ; décalage du nombre de bits nécessaire
+                                shr rax, 1 ; sortie sur le carry flag
+                                ; ----- surcharge destination
+                                jnc pl_pas_d_activation ; on n'active pas la destination si le bit lu est 0
+                                    ; surcharge segment destination
+                                    movsx ecx, word [r15+OS_CHARG0_2] ; charge actuelle destination (word signé -> dword signé)
+                                    movsx eax, byte [r9+OS_BSYNV_1] ; valeur du bloc de boutons (byte signé -> dword signé)
+                                    add ecx, eax ; ajouter les charges du bloc de boutons
+                                    ; limitation de la charge avant enregistrement
+                                    mov eax, CHARGE_MINI
+                                    cmp ecx, eax
+                                    cmovl ecx, eax ; limiter ecx à la valeur minimale d'un word signé (excepté -32768 charge non valide)
+                                    mov eax, CHARGE_MAXI
+                                    cmp ecx, eax
+                                    cmovg ecx, eax ; limiter ecx à la valeur maximale d'un word signé
+                                    ; enregistrer la nouvelle charge
+                                    mov [r15+OS_CHARG0_2], cx
+                                pl_pas_d_activation:
+                                ; persistance
+                                mov bl, [r9+OS_PERSA_1] ; persistance restante actuelle
+                                test bl, bl
+                                jnz pl_persistance_encore_active
+                                    mov bl, [r9+OS_PERSB_1] ; persistance de base (remplace actuelle)
+                                    inc r10w ; augmenter l'index de lecture
+                                    cmp r10w, word [r11+OS_NBSEG_2] ; comparer au nombre de segments à lire
+                                    jne pl_fin_pas_atteinte
+                                        xor r10w, r10w ; reprendre la lecture au début
+                                    pl_fin_pas_atteinte:
+                                    mov [r9+OS_INDEX_2], r10w ; enregistrer l'index de lecture
+                                pl_persistance_encore_active:
+                                dec bl
+                                mov [r9+OS_PERSA_1], bl ; persistance restante
+                                jmp fin_traitement
                     portion_pulseur:
-                        ; ---------- augmentation chrono
-                        xor rcx, rcx
-                        mov cx, [r9+OS_CHARG_2] ; chrono actuel
-                        add rcx, INCREMENT_PULSEURS ; increment chrono
-                        limitation_registre_a_word_SM rcx, (rax) ; limitation haute
-                        mov [r9+OS_CHARG_2], cx ; enregistrement nouveau chrono
-                        tester_charge r9, (rax), (rcx) ; tester chrono comme si c'etait une charge
-                        jb fin_traitement ; jump si rax < rcx / seuil non atteint
-                            mov [r9+OS_CHARG_2], word 0 ; reinitialiser le chrono
-                            recuperer_numero_par_decalage_FVA r9, OS_DESTN_4, (rax) ; numero du neurone destination
-                            test rax, rax
+                        ; augmentation chrono
+                        movzx ebx, word [r9+OS_CHARG0_2] ; chrono actuel (word non signé)
+                        add ebx, INCREMENT_PULSEURS ; incrementation chrono
+                        mov eax, CHRONO_MAXI
+                        cmp ebx, eax
+                        cmova ebx, eax ; limiter ecx à un word non signé
+                        ; seuil
+                        mov cl, [r9+OS_SEUIL_1] ; puissance de seuil avec décalage (maxi 16)
+                        mov eax, 1
+                        shl eax, cl
+                        dec eax ; seuil calculé (0 à 65535)
+                        ; conséquences
+                        mov cx, CHRONO_INITIAL
+                        cmp bx, ax ; tester si le seuil n'est pas atteint
+                        cmovae bx, cx ; réinitialiser le compteur si le seuil a été atteint
+                        mov [r9+OS_CHARG0_2], bx ; enregistrer le nouveau chrono (0 ou valeur incrémentée)
+                        jb fin_traitement ; ne rien faire
+                            xor rax, rax
+                            mov eax, [r9+OS_DESTN_4] ; neurone de destination
+                            test rax, rax ; NEURONE_ZERO ?
                             jz fin_traitement ; si pas de destination, on ne fait rien
-                                adresse_from_numero r11, rax ; adresse neurone de destination
-                                mov al, [r11+OS_CREFR_1]
-                                test al, al ; destination refractaire ?
-                                jnz fin_traitement
-                                    surcharger_portion_de_destination_FFACD r9, r11, (rax), (rcx), (rdx) ; surcharge de la destination
-                                    jmp fin_traitement
-                    ; portions simples
-                    portion_simple_nonactivee_retroactive:
-                        mov [r9], byte TYPE_SIMPLE_NONACTIVEE
-                    portion_simple_nonactivee:
-                        tester_charge r9, (rax), (rcx) ; comparaison charge avec seuil
-                        jb psnx_fuite_et_retroaction ; jump si rax < rcx / seuil non atteint
-                            ; ici la portion est comme activee
-                            mov [r9], byte TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE
-                            mov [r9+OS_CHARG_2], word CHARGE_INITIALE ; reinitialiser la charge
-                            mov al, [r9+OS_BREFR_1]
-                            mov [r9+OS_CREFR_1], al ; recharge de la duree refractaire
-                            recuperer_numero_par_decalage_FVA r9, OS_DESTN_4, (rax) ; numero de destination
-                            test rax, rax
-                            jz portion_simple_pousse_axonale ; si pas de destination, on fait pousser l'axone
-                                adresse_from_numero r11, rax ; adresse de destination
-                                tester_retroactivite_adresse_FA r11, (rax)
-                                jne tp_psnx_surcharge_destination
-                                    mov [r9], byte TYPE_SIMPLE_NONACTIVEE_RETROACTIVE
-                                    negativer_bloc_de_boutons r9, (rax), (rdx)
-                                tp_psnx_surcharge_destination:
-                                mov al, [r11+OS_CREFR_1]
-                                test al, al ; destination refractaire ?
-                                jnz fin_traitement
-                                    surcharger_portion_de_destination_FFACD r9, r11, (rax), (rcx), (rdx) ; surcharge de la destination
-                                    jmp fin_traitement ; sortie normale apres traitement
-                        psnx_fuite_et_retroaction:
-                            decompte_refractaire r9, (rax), (rbx)
-                            fuite_de_charge_portion r9, (rax)
-                            recuperer_numero_par_decalage_FVA r9, OS_DESTN_4, (rax) ; numero de destination
-                            adresse_from_numero r11, rax ; adresse de destination
-                            tester_retroactivite_adresse_FA r11, (rax)
-                            jne fin_traitement
-                                negativer_bloc_de_boutons r9, (rax), (rdx)
-                                jmp fin_traitement ; sortie normale apres traitement
-
-                    portion_simple_postactivee_retroactive:
-                        mov [r9], byte TYPE_SIMPLE_POSTACTIVEE
-                    portion_simple_postactivee:
-                        tester_charge r9, (rax), (rcx) ; comparaison charge avec seuil
-                        jb tp_pspx_fuite_et_retroaction ; jump si rax < rcx / seuil non atteint
-                            ; ici la portion est comme activee
-                            mov [r9], byte TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE
-                            mov [r9+OS_CHARG_2], word CHARGE_INITIALE ; reinitialiser la charge
-                            mov al, [r9+OS_BREFR_1]
-                            mov [r9+OS_CREFR_1], al ; recharge de la duree refractaire
-                            recuperer_numero_par_decalage_FVA r9, OS_DESTN_4, (rax) ; numero de destination
-                            test rax, rax
-                            jz portion_simple_pousse_axonale ; si pas de destination, on fait evoluer l'axone
-                                adresse_from_numero r11, rax ; adresse de destination
-                                tester_retroactivite_adresse_FA r11, (rax)
-                                jne tp_pspx_surcharge_destination
-                                    mov [r9], byte TYPE_SIMPLE_NONACTIVEE_RETROACTIVE
-                                    positiver_bloc_de_boutons r9, (rax), (rdx)
-                                tp_pspx_surcharge_destination:
-                                mov al, [r11+OS_CREFR_1]
-                                test al, al ; destination refractaire ?
-                                jnz fin_traitement
-                                    surcharger_portion_de_destination_FFACD r9, r11, (rax), (rcx), (rdx) ; surcharge de la destination
-                                    jmp fin_traitement ; sortie normale apres traitement
-                        tp_pspx_fuite_et_retroaction:
-                            decompte_refractaire r9, (rax), (rbx)
-                            fuite_de_charge_portion r9, (rax)
-                            recuperer_numero_par_decalage_FVA r9, OS_DESTN_4, (rax) ; numero de destination
-                            test rax, rax
-                            jz fin_traitement ; si pas de destination, on ne fait rien
-                                adresse_from_numero r11, rax ; adresse de destination
-                                tester_retroactivite_adresse_FA r11, (rax)
-                                jne fin_traitement
-                                    mov [r9], byte TYPE_SIMPLE_NONACTIVEE
-                                    positiver_bloc_de_boutons r9, (rax), (rdx)
-                                    jmp fin_traitement ; sortie normale apres traitement
-                    portion_simple_pousse_axonale:
-                        ; pousse axonale
-                            ; offset x et y
-                            mov r11b, byte [r9+OS_EXPDX_SM_1] ; offset actuel sur x
-                            mov r12b, byte [r9+OS_EXPDY_SM_1] ; offset actuel sur y
-                            movsx r11, r11b ; necessaire pour utilisation de cmov.
-                            movsx r12, r12b ; necessaire pour utilisation de cmov.
-                            ; progression axonale
-                            faire_evoluer_dx_dy_SSABCDMMM r11, r12, (rax), (rbx), (rcx), (rdx), r13, r14, r15 ; evolution dx/dy
-                            extraire_x_y_de_numero_FSS r8, rcx, rdx ; extraction des coordonnees de la portion
-                            add rcx, r11 ; ajout du nouveau dx a x
-                            add rdx, r12 ; ajout du nouveau dy a y
-                            limiter_coordonnees_x_y_SSMMM rcx, rdx, (r13), (r14), (r15) ; limitations des coordonnees
-                            construire_numero_de_x_y_FS rcx, rdx ; reconstitution numero de portion cible -> rdx
-                            cmp rdx, r8 ; tester si la cible est la portion elle-meme
-                            je tp_pspa_prolonger_seulement
-                            ; compatibilite de la cible en tant que destination
-                            mov r13, rdx ; sauvegarde du numero de la cible
-                            adresse_from_numero r14, rdx ; adresse de la cible
-                            mov al, byte [r14+0] ; lire le type de la cible
-                            xor rdx, rdx
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_NONACTIVEE, (rcx), (rdx)
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_NONACTIVEE_RETROACTIVE, (rcx), (rdx)
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_POSTACTIVEE, (rcx), (rdx)
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE, (rcx), (rdx)
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_MERE, (rcx), (rdx)
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_MERE_RETROACTIVE, (rcx), (rdx)
-                            ; passage a la creation de liaison si destination compatible
-                            cmp dl, 1
-                            je tp_pspa_enregistrer_destination
-                            ; prolongation seulement, si la cible n'est pas utilisable comme destination
-                            tp_pspa_prolonger_seulement:
-                            ; enregistrement de ofs_x et ofs_y (r11w et r12w sont deja entre -128 et 127)
-                            mov [r9+OS_EXPDX_SM_1], r11b
-                            mov [r9+OS_EXPDY_SM_1], r12b
-                            jmp fin_traitement ; sortie normale apres traitement
-                            ; enregistrer la destination
-                        tp_pspa_enregistrer_destination:
-                            ; sont fixes ici : r8/r9 = simple / r13/r14 = destination
-                            mov [r9+OS_CHARG_2], word CHARGE_INITIALE
-                            mov [r9+OS_SEUIL_2], word SEUIL_STANDARD
-                            mov [r9+OS_VALBB_1], byte VALEUR_BOUTONS_STANDARD
-                            mov [r9+OS_MASBB_1], byte MASSE_BOUTONS_STANDARD
-                            mov [r9+OS_EXPDX_SM_1], byte 0 ; reinit N/U
-                            mov [r9+OS_EXPDY_SM_1], byte 0 ; reinit N/U
-                            mov [r9+OS_DESTN_4], r13d
-                            jmp fin_traitement ; sortie normale apres traitement
-                    ; portions meres
-                    portion_mere_retroactive:
-                        mov [r9], byte TYPE_MERE ; changement en type non-retroactive
-                    portion_mere:
-                        tester_charge r9, (rax), (rcx) ; comparaison charge avec seuil
-                        jb tp_pmx_fuite_de_charge ; jump si rax < rcx / seuil non atteint
-                            mov [r9], byte TYPE_MERE_RETROACTIVE ; changement de nouveau en type retroactive
-                            mov [r9+OS_CHARG_2], word CHARGE_INITIALE ; reinitialiser la charge
-                            mov al, [r9+OS_BREFR_1]
-                            mov [r9+OS_CREFR_1], al ; recharge de la duree refractaire
-                            recuperer_numero_par_decalage_FVA r9, OS_LIAIS_M_4, (rax) ; numero du neurone de liaison
-                            test rax, rax
-                            jz tp_pmx_pousse_axonale ; si pas de liaison, on ne propage pas le declenchement a la liaison suivante
-                                adresse_from_numero r11, rax ; calcul de l'adresse neurone de liaison
-                                mov [r11], byte TYPE_LIAISON_ACTIVEE ; activation de la liaison
-                                jmp fin_traitement ; sortie normale apres traitement
-                            tp_pmx_pousse_axonale:
-                                ; offset x et y
-                                mov r11b, byte [r9+OS_EXPDX_SM_1] ; offset actuel sur x
-                                mov r12b, byte [r9+OS_EXPDY_SM_1] ; offset actuel sur y
-                                movsx r11, r11b ; necessaire pour utilisation de cmov.
-                                movsx r12, r12b ; necessaire pour utilisation de cmov.
-                                ; progression axonale
-                                faire_evoluer_dx_dy_SSABCDMMM r11, r12, (rax), (rbx), (rcx), (rdx), r13, r14, r15 ; evolution dx/dy
-                                extraire_x_y_de_numero_FSS r8, rcx, rdx ; extraction des coordonnees de la portion
-                                add rcx, r11 ; ajout du nouveau dx a x
-                                add rdx, r12 ; ajout du nouveau dy a y
-                                limiter_coordonnees_x_y_SSMMM rcx, rdx, (r13), (r14), (r15) ; limitations des coordonnees
-                                construire_numero_de_x_y_FS rcx, rdx ; reconstitution numero de portion cible -> rdx
-                                cmp rdx, r8 ; tester si la cible est la portion elle-meme
-                                je tp_pmx_prolonger_seulement
-                                ; compatibilite de la cible en tant que destination
-                                mov r13, rdx ; sauvegarde du numero de la cible
-                                adresse_from_numero r14, rdx ; adresse de la cible
-                                mov al, byte [r14+0] ; lire le type de la cible
-                                xor rdx, rdx
-                                comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_NONACTIVEE, (rcx), (rdx)
-                                comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_NONACTIVEE_RETROACTIVE, (rcx), (rdx)
-                                comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_POSTACTIVEE, (rcx), (rdx)
-                                comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE, (rcx), (rdx)
-                                comparer_al_valeur_vers_dl_AVCD (rax), TYPE_MERE, (rcx), (rdx)
-                                comparer_al_valeur_vers_dl_AVCD (rax), TYPE_MERE_RETROACTIVE, (rcx), (rdx)
-                                ; passage a la creation de liaison si destination compatible
-                                cmp dl, 1
-                                je tp_pmx_faire_liaison
-                                ; prolongation seulement, si la cible n'est pas utilisable comme destination
-                                tp_pmx_prolonger_seulement:
-                                ; enregistrement de ofs_x et ofs_y (r11w et r12w sont deja entre -128 et 127)
-                                mov [r9+OS_EXPDX_SM_1], r11b
-                                mov [r9+OS_EXPDY_SM_1], r12b
-                                jmp fin_traitement ; sortie normale apres traitement
-                                ; creer la liaison
-                            tp_pmx_faire_liaison:
-                                ; sont fixes ici : r8/r9 = mere / r13/r14 = destination
-                                chercher_portion_libre_FASMSTT r8, (rax), rdx, r11, r12, tp_pmx_creer_liaison, fin_traitement
-                                tp_pmx_creer_liaison:
-                                ; attribuer la liaison r11/r12 a la mere
-                                mov [r9+OS_EXPDX_SM_1], byte 0 ; reinit N/U
-                                mov [r9+OS_EXPDY_SM_1], byte 0 ; reinit N/U
-                                mov [r9+OS_LIAIS_M_4], r11d
-                                creer_liaison_vierge_FN r12, r13
-                                jmp fin_traitement ; sortie normale apres traitement
-                        tp_pmx_fuite_de_charge:
-                            decompte_refractaire r9, (rax), (rbx)
-                            fuite_de_charge_portion r9, (rax)
-                            jmp fin_traitement ; sortie normale apres traitement
-                    ; portions liaison
-                    portion_liaison_nonactivee:
-                        recuperer_numero_par_decalage_FVA r9, OS_DESTN_4, (rax) ; numero de destination
-                        test rax, rax
-                        jz fin_traitement ; si pas de destination, on ne fait rien
-                            adresse_from_numero r11, rax ; adresse de destination
-                            tester_retroactivite_adresse_FA r11, (rax)
-                            jne fin_traitement
-                                negativer_bloc_de_boutons r9, (rax), (rdx)
-                                jmp fin_traitement ; sortie normale apres traitement
-                    portion_liaison_activee:
-                        mov [r9], byte TYPE_LIAISON_POSTACTIVEE ; s'auto postactiver
-                        pla_1:
-                        recuperer_numero_par_decalage_FVA r9, OS_DESTN_4, (rax) ; numero de destination
-                        test rax, rax ; destination non-valide ?
-                        jz portion_liaison_pousse_destinataire
-                        pla_2:
-                        adresse_from_numero r11, rax
-                        tester_retroactivite_adresse_FA r11, (rax) ; destination non-retroactive ?
-                        jne pla_4
-                        pla_3:
-                        mov [r9], byte TYPE_LIAISON_NONACTIVEE ; passage en mode non activee
-                        positiver_bloc_de_boutons r9, (rax), (rdx)
-                        pla_4:
-                        mov al, [r11+OS_CREFR_1]
-                        test al, al ; destination refractaire ?
-                        jnz portion_liaison_pousse_collaterale
-                        pla_5:
-                        surcharger_portion_de_destination_FFACD r9, r11, (rax), (rcx), (rdx) ; surcharge de la destination
-                        pla_6:
-                        recuperer_numero_par_decalage_FVA r9, OS_LIAIS_L_4, (rax) ; numero de liaison suivante
-                        test rax, rax ; liaison non valide ?
-                        jz fin_traitement ; si pas de liaison, on ne fait plus rien (car surcharge deja utilisee)
-                        pla_7:
-                        adresse_from_numero r11, rax ; adresse de liaison suivante
-                        mov [r11], byte TYPE_LIAISON_ACTIVEE ; activation de la liaison suivante
-                        jmp fin_traitement
-
-                        portion_liaison_pousse_destinataire:
-                        ; cette situation ne peut en principe pas arriver
-                        ; puisque une liaison n'est creee que quand on a deja une destination cible
-                        ; A_FAIRE quand meme : pousse destination
-                        jmp pla_6
-
-                        portion_liaison_pousse_collaterale:
-                        recuperer_numero_par_decalage_FVA r9, OS_LIAIS_L_4, (rax) ; numero de liaison suivante
-                        test rax, rax ; liaison valide ?
-                        jnz pla_7
-
-                        ; pousse collaterale
-                            ; offset x et y
-                            mov r11b, byte [r9+OS_EXPDX_L_1] ; offset actuel sur x
-                            mov r12b, byte [r9+OS_EXPDY_L_1] ; offset actuel sur y
-                            movsx r11, r11b ; necessaire pour utilisation de cmov.
-                            movsx r12, r12b ; necessaire pour utilisation de cmov.
-                            ; progression axonale
-                            faire_evoluer_dx_dy_SSABCDMMM r11, r12, (rax), (rbx), (rcx), (rdx), r13, r14, r15 ; evolution dx/dy
-                            extraire_x_y_de_numero_FSS r8, rcx, rdx ; extraction des coordonnees de la portion
-                            add rcx, r11 ; ajout du nouveau dx a x
-                            add rdx, r12 ; ajout du nouveau dy a y
-                            limiter_coordonnees_x_y_SSMMM rcx, rdx, (r13), (r14), (r15) ; limitations des coordonnees
-                            construire_numero_de_x_y_FS rcx, rdx ; reconstitution numero de portion cible -> rdx
-                            cmp rdx, r8 ; tester si la cible est la portion elle-meme
-                            je tp_pla_pc_prolonger_seulement
-                            ; compatibilite de la cible en tant que destination
-                            mov r13, rdx ; sauvegarde du numero de la cible
-                            adresse_from_numero r14, rdx ; adresse de la cible
-                            mov al, byte [r14+0] ; lire le type de la cible
-                            xor rdx, rdx
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_NONACTIVEE, (rcx), (rdx)
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_NONACTIVEE_RETROACTIVE, (rcx), (rdx)
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_POSTACTIVEE, (rcx), (rdx)
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE, (rcx), (rdx)
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_MERE, (rcx), (rdx)
-                            comparer_al_valeur_vers_dl_AVCD (rax), TYPE_MERE_RETROACTIVE, (rcx), (rdx)
-                            ; passage a la creation de liaison si destination compatible
-                            cmp dl, 1
-                            je tp_pla_pc_faire_liaison
-                            ; prolongation seulement, si la cible n'est pas utilisable comme destination
-                            tp_pla_pc_prolonger_seulement:
-                            ; enregistrement de ofs_x et ofs_y (r11w et r12w sont deja entre -128 et 127)
-                            mov [r9+OS_EXPDX_L_1], r11b
-                            mov [r9+OS_EXPDY_L_1], r12b
-                            jmp fin_traitement ; sortie normale apres traitement
-                            ; enregistrer la destination
-                            tp_pla_pc_faire_liaison:
-                            ; sont fixes ici : r8/r9 = mere / r13/r14 = destination
-                            chercher_portion_libre_FASMSTT r8, (rax), rdx, r11, r12, tp_pla_pc_creer_liaison, fin_traitement
-                            tp_pla_pc_creer_liaison:
-                            ; attribuer la liaison r11/r12 a la mere
-                            mov [r9+OS_EXPDX_SM_1], byte 0 ; reinit N/U
-                            mov [r9+OS_EXPDY_SM_1], byte 0 ; reinit N/U
-                            mov [r9+OS_LIAIS_M_4], r11d
-                            creer_liaison_vierge_FN r12, r13
-                            jmp fin_traitement ; sortie normale apres traitement
-                    portion_liaison_postactivee:
-                        recuperer_numero_par_decalage_FVA r9, OS_DESTN_4, (rax) ; numero de destination
-                        adresse_from_numero r11, rax ; adresse de destination
-                        test rax, rax
-                        jz fin_traitement ; pas de destination, on ne fait rien
-                            tester_retroactivite_adresse_FA r11, (rax)
-                            jne fin_traitement
-                                mov [r9], byte TYPE_LIAISON_NONACTIVEE ; passage en mode non activee
-                                positiver_bloc_de_boutons r9, (rax), (rdx)
-                                jmp fin_traitement ; sortie normale apres traitement
-
+                                adresse_from_numero rdx, rax ; adresse neurone de destination
+                                movsx ecx, word [rdx+OS_CHARG0_2] ; charge actuelle destination (word signé -> dword signé)
+                                movsx eax, byte [r9+OS_BSYNV_1] ; valeur du bloc de boutons (byte signé -> dword signé)
+                                add ecx, eax ; ajouter les charges du bloc de boutons
+                                ; limitation de la charge avant enregistrement
+                                mov eax, CHARGE_MINI
+                                cmp ecx, eax
+                                cmovl ecx, eax ; limiter ecx à la valeur minimale d'un word signé (excepté -32768 charge non valide)
+                                mov eax, CHARGE_MAXI
+                                cmp ecx, eax
+                                cmovg ecx, eax ; limiter ecx à la valeur maximale d'un word signé
+                                ; enregistrer la nouvelle charge
+                                mov [rdx+OS_CHARG0_2], cx
+                                jmp fin_traitement
                     ; fin
                     fin_traitement:
 
@@ -1516,55 +1145,42 @@ section .text ; ----------------------------------------------------------------
                     inc r8
                     cmp r8, NOMBRE_DE_PORTIONS
                 jne bouclage_portions
-                ; recuperation du time stamp
+                ; recuperation du timestamp
                 xor rax, rax
                 rdtsc ; -> edx:eax
                 shl rdx, 32
-                or rax, rdx
-                ; recuperation du time stamp de debut
-                ; et re-alignement de la pile suite pop r8
-                pop rcx
-                ; calcul de la difference
-                sub rax, rcx
-                ; stocker le resultat
-                mov [dureeDeTraitement], rax
-                ; ----- temporisation
-                xor rcx, rcx
-                mov cl, [lenteur]
-                cmp cl, 0
-                je finTempo
-                dec cl
-                mov rax, 1
-                shl rax, cl
-                boucleTempo:
-                    dec rax
-                    test rax, rax
-                jnz boucleTempo
-                finTempo:
-                ; bouclage
-                mov rax, qword [bouclage_rapide_actuel]
-                dec rax
-                mov qword [bouclage_rapide_actuel], rax
-                test rax, rax
-            jnz bouclage_rapide
-            ; recuperation de la zone d'affichage
-                mov rcx, [Windowhandle]         ; hWnd
-                mov rdx, 0                          ; lpRect
-                mov r8, 0                           ; bErase
-                add rsp, SHADOW_SPACE_SIZE
-                call InvalidateRect
-                sub rsp, SHADOW_SPACE_SIZE
-            ; demande de retracage de la fenetre
-                mov rcx, qword [Windowhandle]       ; hWnd
-                mov rdx, 0                          ; lprcUpdate
-                mov r8, 0                           ; hrgnUpdate
-                mov r9, RDW_INTERNALPAINT           ; flags
-                sub rsp, SHADOW_SPACE_SIZE
-                call RedrawWindow
-                add rsp, SHADOW_SPACE_SIZE
-            ; ----------------- liberation / traitement des messages fenetre en attente
-            boucleDesMessages:
-                ; si plus de message en attente, on sort pour reboucler moyen
+                or rdx, rax ; timestamp condensé
+                mov rcx, rdx ; mise de côté pour durée boucle rapide
+                ; durée en nombre de cycles processeur
+                pop rax ; recuperation du time stamp de debut et re-alignement de la pile suite pop r8
+                sub rdx, rax ; durée boucle de traitement en cycles (environ 30_000_000 à vide)
+                ; calcul de la duree en nanoSecondes
+                shr rdx, 10 ; durée en kiloCycles (environ 30_000 à vide)
+                mov rax, DUREE_DE_CYCLE_PS ; en ps/cycle (369 sur mon ordi)
+                mul rdx ; durée en kilocycle*ps/cycle => ns/cycle (11_000_000 sur mon ordi à vide)
+                shr rax, 10 ; durée en us/cycle (environ 11_000 sur mon ordi à vide)
+                mov [dureeDeTraitement], rax ; stocker le resultat
+                ; forcage sortie si mode pas à pas
+                mov bl, [mode_pas_a_pas]
+                test bl, bl
+                jnz boucle_moyenne_suite
+                ; conditionnement de sortie bouclage rapide
+                mov rax, [debut_bouclage_rapide] ; récupération début de boucle
+                sub rcx, rax ; durée de la boucle rapide
+                cmp rcx, NBCYCLES_BOUCLE_MOYENNE
+            jb bouclage_rapide
+            boucle_moyenne_suite:
+            ; masque + demande de retraçage
+                call retracer_la_fenetre
+            ; ecritures si pas à pas
+                mov bl, [mode_pas_a_pas]
+                test bl, bl
+                jz pas_d_ecriture_apres_boucle_rapide
+                    call ecrire_messages_console
+                pas_d_ecriture_apres_boucle_rapide:
+            ; ----- liberation / traitement des messages fenetre en attente
+            messagesLoop:
+                ; lecture des messages windows un par un
                     lea   rcx, [WindowMessage]              ; lpMsg
                     xor   edx, edx                          ; hWnd
                     xor   r8d, r8d                          ; wMsgFilterMin
@@ -1575,9 +1191,27 @@ section .text ; ----------------------------------------------------------------
                     call  PeekMessageA
                     add   rsp, SHADOW_SPACE_SIZE
                     add   rsp, 16
-                ; sortie si pas/plus de messages en attente
+                ; tests pour sorties
                     test rax, rax
-                    jz traitementMessagesFini ; on passe a la suite si pas de message en attente
+                    jnz continue_MLoop_1 ; on continue la boucle s'il y a un message à traiter
+                        test bl, bl
+                        jz traitementMessagesFini ; on sort si pas mode pas-à-pas (et pas de message à traiter)
+                    continue_MLoop_1:
+                    mov bl, [mode_pas_a_pas]
+                    cmp bl, 2
+                    jne continue_MLoop_2 ; on continue si pas de demande d'avance d'un pas en pas-à-pas (mode_pas_a_pas <> 2)
+                        mov bl, 1
+                        mov [mode_pas_a_pas], bl
+                        jmp traitementMessagesFini ; on sort si demande d'avance d'un pas (donc mode pas-à-pas)
+                    continue_MLoop_2:
+                ; demande de retraçage
+                    test rax, rax
+                    jz continue_MLoop_3 ; on ne fait rien si pas de message (donc mode pas-à-pas)
+                        test bl, bl
+                        jz continue_MLoop_3 ; on retrace si mode pas à pas + message
+                            call retracer_la_fenetre
+                            call ecrire_messages_console
+                    continue_MLoop_3:
                 ; recuperation du message
                     lea   rcx, [WindowMessage]              ; lpMsg
                     xor   edx, edx                          ; hWnd
@@ -1588,16 +1222,16 @@ section .text ; ----------------------------------------------------------------
                     add   rsp, SHADOW_SPACE_SIZE
                 ; sortie si c'est une demande de fermeture WM_QUIT
                     cmp   rax, 0
-                    je    sortieComplete                    ; on arrete tout = sortie toutes boucle
+                    je    sortieComplete                    ; on arrete tout = sortie toutes boucles
                 ; analyse du message
                     mov   rcx, qword [Windowhandle]         ; hDlg
                     lea   rdx, [WindowMessage]                ; lpMsg
                     sub   rsp, SHADOW_SPACE_SIZE
                     call  IsDialogMessageA                  ; For keyboard strokes (?)
                     add   rsp, SHADOW_SPACE_SIZE
-                ; bouclage si ... ?
+                ; bouclage si autre chose d'une touche clavier
                     cmp   rax, 0
-                    jne   boucleDesMessages                 ; le message a ete traite par IsDialogMessageA => on reboucle
+                    jne   messagesLoop                 ; le message a ete traite par IsDialogMessageA => on reboucle
                 ; traduction du message
                     lea   rcx, [WindowMessage]                ; lpMsg
                     sub   rsp, SHADOW_SPACE_SIZE
@@ -1608,52 +1242,67 @@ section .text ; ----------------------------------------------------------------
                     sub   rsp, SHADOW_SPACE_SIZE
                     call  DispatchMessageA
                     add   rsp, SHADOW_SPACE_SIZE
-                ; bouclage
-            jmp boucleDesMessages
-            ; fin
+                ; c'est ici qu'il faudrait retracer la fenêtre ?
+                
+                ; bouclage messages
+            jmp messagesLoop
+            ; sortie de la boucle des messages
             traitementMessagesFini:
-            mov rax, qword [bouclage_moyen_actuel]
-            dec rax
-            mov qword [bouclage_moyen_actuel], rax
-            test rax, rax
-        jnz bouclage_moyen
+            xor rax, rax
+            rdtsc ; -> edx:eax
+            shl rdx, 32
+            or rdx, rax ; timestamp condensé
+            ; conditionnement de sortie bouclage moyen
+                mov rax, [debut_bouclage_moyen] ; récupération début de boucle
+                sub rdx, rax ; durée de la boucle moyenne
+                mov rax, NBCYCLES_BOUCLE_LENTE
+                cmp rdx, rax
+            ; bouclage moyen
+        jb bouclage_moyen
+        apres_boucle_moyenne:
         mov rax, qword [bouclage_lent_actuel]
         add rax, 1
         mov qword [bouclage_lent_actuel], rax
-        ; Ecrire l'interligne + le numero de boucle
-        make_a_winapi64_style_call convertir, rax, nombre_text, NOMBRE_LONG
-        make_a_winapi64_style_call GetStdHandle, STD_OUTPUT_HANDLE
-        mov r15, rax
-        make_a_winapi64_style_call WriteConsoleA, r15, interligne_text, INTERLIGNE_LONG, reponse_long_ret
-        make_a_winapi64_style_call WriteConsoleA, r15, nombre_text, NOMBRE_LONG, reponse_long_ret
-        ; temps de boucle de portion
-        mov rax, [dureeDeTraitement]
-        make_a_winapi64_style_call convertir, rax, nombre_text, NOMBRE_LONG
-        make_a_winapi64_style_call WriteConsoleA, r15, nombre_text, NOMBRE_LONG, reponse_long_ret
-        ; nombre de boucles rapides actuel
-        mov rax, qword [bouclage_rapide_en_cours]
-        make_a_winapi64_style_call convertir, rax, nombre_text, NOMBRE_LONG
-        make_a_winapi64_style_call WriteConsoleA, r15, nombre_text, NOMBRE_LONG, reponse_long_ret
-        ; Detailler eventuellement dans la console
-        xor rax, rax
-        mov al, [detailConsole]
-        test rax, rax
-        jz ne_pas_detailler
-            mov rax, PORTION_A_DETAILLER
-            call detailler_portion
-        ne_pas_detailler:
+        ; écritures si pas mode pas-à-pas
+            mov bl, [mode_pas_a_pas]
+            test bl, bl
+            jnz pas_d_ecriture_dans_boucle_lente
+                call ecrire_messages_console
+            pas_d_ecriture_dans_boucle_lente:
         ; bouclage lent
     jmp bouclage_lent
 ; ------------------------------------------------------------------------------------------------- SORTIE
     sortieComplete:
     ; finalisation ----------------------------------------------
-        make_a_winapi64_style_call WriteConsoleA, r15, interligne_text, INTERLIGNE_LONG, reponse_long_ret
+        call_winapi64_style GetStdHandle, STD_OUTPUT_HANDLE
+        mov r15, rax
+        call_datapush_style ecrire_ligne_3, r15, interligne_text, r15
     ; fin du programme
         ; add rsp, 8
         xor rcx, rcx
         call ExitProcess
-; ------------------------------------------------------------------------------------------------- OUTILS
-    convertir: ;=====================================================
+; ------------------------------------------------------------------------------------------------- OUTILS AFFICHAGES
+    retracer_la_fenetre:
+        sub rsp, 8
+        ; recuperation de la zone d'affichage
+        mov rcx, [Windowhandle]             ; hWnd
+        mov rdx, 0                          ; lpRect
+        mov r8, 0                           ; bErase
+        add rsp, SHADOW_SPACE_SIZE
+        call InvalidateRect
+        sub rsp, SHADOW_SPACE_SIZE
+        ; demande de retracage de la fenetre
+        mov rcx, qword [Windowhandle]       ; hWnd
+        mov rdx, 0                          ; lprcUpdate
+        mov r8, 0                           ; hrgnUpdate
+        mov r9, RDW_INTERNALPAINT           ; flags
+        sub rsp, SHADOW_SPACE_SIZE
+        call RedrawWindow
+        add rsp, SHADOW_SPACE_SIZE
+        add rsp, 8
+        ret
+
+    convertir:
         ; ---------- en entree :
         ; rcx = nombre a convertir
         ; rdx = adresse ou placer le texte
@@ -1665,7 +1314,7 @@ section .text ; ----------------------------------------------------------------
         push r9
         ; raz de la chaine qui est a l'adresse rdx
         init_chaine:
-            mov byte [rdx], '>'
+            mov byte [rdx], '.'
             inc rdx
             dec r8
             test r8, r8
@@ -1691,839 +1340,559 @@ section .text ; ----------------------------------------------------------------
         pop rdx
         pop rcx
         ret
-    detailler_portion: ;=====================================================
-        ; ----- en entree :
-            ; rax = numero de portion
-        ; ----- en sortie :
-            ; rax = type de la portion
+    ecrire_ligne_3:
+        ; ---------- en entree :
+        ; Arguments : HandleConsole / AdresseTexte (texte fini par 0)(ou vide) / Nombre (ou -1 sur 64 bits)
+        ; Le curseur doit déjà être à sa place
+        ; ---------- alignement pile + sauvegarde registres
+        push rax
+        push rbx
+        push rcx
+        push rdx
+        sub rsp, 8
+        ; ---------- définir le caractère de remplissage
+            mov cl, byte ' ' ; caractère de remplissage par défaute = espace
+            mov rax, [rsp+8*(5+1)] ; nombre à écrire
+            cmp rax, -1
+            je el_pas_nombre
+                mov cl, byte '.' ; s'il y a un nombre, alors ce sera un point
+            el_pas_nombre:
+        ; ---------- précharger le fond dans texte_a_ecrire
+            lea rbx, [texte_a_ecrire] ; adresse de début de texte
+            mov rax, LONGUEUR_LIGNES ; nombre de caractères dans la ligne
+            raz_chaine:
+                mov [rbx], cl ; écriture du caractère
+                inc rbx ; emplacement du caractère suivant
+                dec rax ; décompte
+                test rax, rax
+            jnz raz_chaine
+        ; ---------- s'il y a un texte, on le surajoute
+            mov rdx, [rsp+8*(5+2)] ; adresse de début de texte à ajouter
+            lea rbx, [texte_a_ecrire] ; adresse de début de texte
+            mov rcx, LONGUEUR_LIGNES ; nombre de caracteres maxi
+            el_surajouter:
+                mov al, [rdx]
+                test al, al
+                je el_surajouter_fin
+                mov [rbx], al
+                inc rbx
+                inc rdx
+                dec rcx
+                test rcx, rcx
+            jnz el_surajouter
+            el_surajouter_fin:
+        ; ---------- s'il y a un nombre, le surajouter
+            lea rbx, [texte_a_ecrire] ; adresse de début de texte
+            add rbx, LONGUEUR_LIGNES
+            mov rax, [rsp+8*(5+1)] ; nombre à écrire
+            cmp rax, -1
+            je el_pas_nombre_2
+                el_convertir:
+                    dec rbx ; remonter dans la ligne de texte à écrire
+                    xor rdx, rdx    ; on met rdx a 0 (partie haute du dividende)
+                                    ; le nombre est dans eax (partie basse du dividende)
+                    mov rcx, 10     ; on fixe la base de conversion (diviseur)
+                    div rcx             ; on fait la division de rdx:rax par rcx => quotient=rax / reste=rdx
+                    add dl, '0'         ; on ajoute le numero ascii de "0" au dernier octet des rdx
+                    mov byte [rbx], dl  ; on ecrit le dernier octet
+                    test rax, rax       ; on regarde si rax est nul
+                jnz el_convertir        ; si ce n'est pas nul on continue
+            el_pas_nombre_2:
+        ; ---------- écrire le texte à la position courante
+            mov rcx, [rsp+8*(5+3)] ; handle console
+            call_winapi64_style WriteConsoleA, rcx, texte_a_ecrire, LONGUEUR_LIGNES+1, written
+        ; ---------- récupération registres + désalignement pile
+        add rsp, 8
+        pop rdx
+        pop rcx
+        pop rbx
+        pop rax
+        ret
+    detailler_portion:
         ; ----- recalage et sauvegarde des registres modifies
-            push r15 ; utilise pour le handle de console
-            push r14 ; utilise pour le compteur de boucle
-            push r13 ; disponible (pour calage pile)
-            push rdx ; utilise pour l'adresse de portion
-            push rcx ; utilise pour les valeurs a afficher
-            ; le push pour recuperer rax a la fin est fait plus tard
-        ; ----- adresse de base -> rdx
-            mov rcx, rax ; sauvegarde du numero de portion pour l'afficher plus tard
-            adresse_from_numero rdx, rax
-        ; ----- Handle de sortie -> r15
-            make_a_winapi64_style_call GetStdHandle, STD_OUTPUT_HANDLE
-            mov r15, rax
-        ; ----- Interligne
-            make_a_winapi64_style_call WriteConsoleA, r15, interligne_text, INTERLIGNE_LONG, reponse_long_ret
-        ; ----- Numero de la portion
-            make_a_winapi64_style_call WriteConsoleA, r15, portion_numr_text, PORTION_NUMR_LONG, reponse_long_ret
-            make_a_winapi64_style_call convertir, rcx, nombre_text, NOMBRE_LONG
-            make_a_winapi64_style_call WriteConsoleA, r15, nombre_text, NOMBRE_LONG, reponse_long_ret
-        ; ----- Position a l'ecran
-            push rcx
-            push rdx
-        ;
-            mov rdx, rcx
-            shr rdx, BITS_POUR_X ; = y
-            mov rax, rdx
-            shl rax, BITS_POUR_X ; = base y
-            sub rcx, rax ; = x
-            ; ----- position x
-            make_a_winapi64_style_call convertir, rcx, nombre_text, NOMBRE_LONG
-            make_a_winapi64_style_call WriteConsoleA, r15, nombre_text, NOMBRE_LONG, reponse_long_ret
-            ; ----- position y
-            make_a_winapi64_style_call convertir, rdx, nombre_text, NOMBRE_LONG
-            make_a_winapi64_style_call WriteConsoleA, r15, nombre_text, NOMBRE_LONG, reponse_long_ret
-        ;
-            pop rdx
-            pop rcx
-        ; ----- type de portion
-            xor rcx, rcx
-            mov cl, [rdx]
-            push rcx ; => sera recupere a la fin pour rax
-            ligne_de_valeur r15, rdx, 0, cl, rcx, portion_type_text, PORTION_TYPE_LONG ; type de portion
+            sub rsp, 8
+            push rax ; utilise pour travail
+            push rbx ; utilise pour handle de sortie
+            push rcx ; utilise numero de portion / compteur
+            push rdx ; utilise adresse de portion
+        ; ----- numero de portion -> rcx
+            mov rax, [visualize_z]
+            shl rax, BITS_POUR_Y
+            add rax, [visualize_y]
+            shl rax, BITS_POUR_X
+            add rax, [visualize_x]
+            mov rcx, rax
+        ; ----- préparatifs        
+            adresse_from_numero rdx, rax ; adresse de la portion -> rdx
+            call_winapi64_style GetStdHandle, STD_OUTPUT_HANDLE
+            mov rbx, rax ; Handle de sortie -> rbx
+        ; ----- écritures communes
+            call_datapush_style ecrire_ligne_3, rbx, interligne_text, -1 ;              interligne
+            call_datapush_style ecrire_ligne_3, rbx, portion_numr_text, rcx ;           numero de la portion
+            call_datapush_style ecrire_ligne_3, rbx, texte_position_x, qword [visualize_x] ;  position x
+            call_datapush_style ecrire_ligne_3, rbx, texte_position_y, qword [visualize_y] ;  position y
+            call_datapush_style ecrire_ligne_3, rbx, texte_position_z, qword [visualize_z] ;  position z
+            call_datapush_style ecrire_ligne_3, rbx, interligne_text, -1 ;              interligne
+            ligne_de_valeur rbx, rdx, OS_TYPEVSA_1, cl, rcx, portion_type_text ;        type de portion
         ; ----- distribution
-            comparer_et_jump_si_egal cl, TYPE_LECTEUR,                         dp_plc
-            comparer_et_jump_si_egal cl, TYPE_PULSEUR,                         dp_ppl
-            comparer_et_jump_si_egal cl, TYPE_SIMPLE_NONACTIVEE,               dp_ps
-            comparer_et_jump_si_egal cl, TYPE_SIMPLE_NONACTIVEE_RETROACTIVE,   dp_ps
-            comparer_et_jump_si_egal cl, TYPE_SIMPLE_POSTACTIVEE,              dp_ps
-            comparer_et_jump_si_egal cl, TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE,  dp_ps
-            comparer_et_jump_si_egal cl, TYPE_MERE,                            dp_pm
-            comparer_et_jump_si_egal cl, TYPE_MERE_RETROACTIVE,                dp_pm
-            comparer_et_jump_si_egal cl, TYPE_LIAISON_NONACTIVEE,              dp_pl
-            comparer_et_jump_si_egal cl, TYPE_LIAISON_POSTACTIVEE,             dp_pl
-            comparer_et_jump_si_egal cl, TYPE_LIAISON_ACTIVEE,                 dp_pl
+            xor rcx, rcx
+            mov cl, [rdx+OS_TYPEVSA_1]
+                mov al, cl
+                and cl, MASQUE_TYPE_TExx
+                and al, MASQUE_TYPE_Txxx
+            ; A_FAIRE : appliquer un masque et de faire les tests uniquement sur les 5 premiers bits
+            comparer_et_jump_si_egal al, TYPE_SEGMENT_GERME,                    dp_psd
+            comparer_et_jump_si_egal al, TYPE_NEURONE_GERME,                    dp_pn
+            comparer_et_jump_si_egal al, TYPE_EXTENSION_GERME,                  dp_pea
+            comparer_et_jump_si_egal cl, TYPE_SOURCE,                           dp_sdm
+            comparer_et_jump_si_egal cl, TYPE_LECTEUR,                          dp_plc
+            comparer_et_jump_si_egal cl, TYPE_PULSEUR,                          dp_ppl
         ; ----- traitement par defaut
-            mov r14, 1
+            inc rdx ; on n'écrit pas le premier octet (type)
+            mov rcx, 1
             dp_boucle:
-                push r14
-                add r14, rdx
                 xor rax, rax
-                mov al, [r14]
-                make_a_winapi64_style_call convertir, rax, nombre_text, NOMBRE_LONG
-                make_a_winapi64_style_call WriteConsoleA, r15, nombre_text, NOMBRE_LONG, reponse_long_ret
-                pop r14
-                inc r14
-                cmp r14, TAILLE_DES_PORTIONS
-            jne dp_boucle
+                mov al, [rdx]
+                call_winapi64_style convertir, rax, nombre_text, NOMBRE_LONG
+                call_winapi64_style WriteConsoleA, rbx, nombre_text, NOMBRE_LONG, reponse_long_ret
+                inc rdx
+                inc rcx
+                cmp rcx, TAILLE_DES_PORTIONS
+            jbe dp_boucle
             jmp dp_fin
-        dp_plc:
-            ligne_de_valeur r15, rdx, 1, rcx, rcx, portion_adrs_text, PORTION_ADRS_LONG ; adresse source
-            ligne_de_valeur r15, rdx, 9, cx, rcx, portion_nseg_text, PORTION_NSEG_LONG ; nombre de segments
-            ligne_de_valeur r15, rdx, 11, cl, rcx, portion_tseg_text, PORTION_TSEG_LONG ; taille de segment
-            ligne_de_valeur r15, rdx, TAILLE_DES_PORTIONS, cl, rcx, portion_type_text, PORTION_TYPE_LONG ; type de la portion suivante
-            ligne_de_valeur r15, rdx, TAILLE_DES_PORTIONS+1, cx, rcx, portion_idxl_text, PORTION_IDXL_LONG ; index de lecture
-            ligne_de_valeur r15, rdx, TAILLE_DES_PORTIONS+3, cl, rcx, portion_prsb_text, PORTION_PRSB_LONG ; persistance de base
-            ligne_de_valeur r15, rdx, TAILLE_DES_PORTIONS+4, cl, rcx, portion_bitl_text, PORTION_BITL_LONG ; numero de bit a lire
-            ligne_de_valeur r15, rdx, TAILLE_DES_PORTIONS+5, cl, rcx, portion_blcv_text, PORTION_BLCV_LONG ; valeur du bloc de boutons
-            ligne_de_valeur r15, rdx, TAILLE_DES_PORTIONS+6, cl, rcx, portion_nonu_text, PORTION_NONU_LONG ; non utilise
-            ligne_de_valeur r15, rdx, TAILLE_DES_PORTIONS+7, cl, rcx, portion_nonu_text, PORTION_NONU_LONG ; non utilise
-            ligne_de_valeur r15, rdx, TAILLE_DES_PORTIONS+8, ecx, rcx, portion_dest_text, PORTION_DEST_LONG ; portion de destination
+        ; -----------------------------------------------------------------------------------------------
+        dp_sdm: ; portion source de données en mémoire
+            ligne_de_valeur rbx, rdx, OS_ADDRS_8, rcx, rcx, portion_adrs_text ; adresse source
+            ligne_de_valeur rbx, rdx, OS_LGSEG_1, cl, rcx, portion_tseg_text ; taille de segment
+            ligne_de_valeur rbx, rdx, OS_NBSEG_2, cx, rcx, portion_nseg_text ; nombre de segments
             jmp dp_fin
-        dp_ppl:
-            ligne_de_valeur r15, rdx, OS_CHARG_2, cx, rcx, portion_chro_text, PORTION_CHRO_LONG ; chrono
-            ligne_de_valeur r15, rdx, OS_SEUIL_2, cx, rcx, portion_chrl_text, PORTION_CHRL_LONG ; seuil charge
-            ligne_de_valeur r15, rdx, OS_VALBB_1, cl, rcx, portion_blcv_text, PORTION_BLCV_LONG ; valeur du bloc de boutons
-            ligne_de_valeur r15, rdx, OS_DESTN_4, ecx, rcx, portion_dest_text, PORTION_DEST_LONG ; numero de destination
+        dp_plc: ; portion lecteur
+            ligne_de_valeur rbx, rdx, OS_INDEX_2, cx, rcx, portion_idxl_text ; index de lecture
+            ligne_de_valeur rbx, rdx, OS_NMBIT_1, cl, rcx, portion_bitl_text ; numero de bit a lire
+            ligne_de_valeur rbx, rdx, OS_BSYNV_1, cl, rcx, portion_blcv_text ; valeur du bloc de boutons
+            ligne_de_valeur rbx, rdx, OS_PERSA_1, cl, rcx, portion_prsa_text ; persistance actuelle
+            ligne_de_valeur rbx, rdx, OS_PERSB_1, cl, rcx, portion_prsb_text ; persistance de base
+            ligne_de_valeur rbx, rdx, OS_DESTN_4, ecx, rcx, portion_dest_text ; portion de destination
+            ligne_de_valeur rbx, rdx, OS_PAMEM_4, ecx, rcx, portion_pamm_text ; portion d'accès mémoire
             jmp dp_fin
-        dp_ps:
-            ligne_de_valeur r15, rdx, 0, cl, rcx, portion_type_simple_text, PORTION_TYPE_SIMPLE_LONG ; type simple
-            ligne_de_valeur r15, rdx, OS_CHARG_2, cx, rcx, portion_chrg_text, PORTION_CHRG_LONG ; charge
-            ligne_de_valeur r15, rdx, OS_SEUIL_2, cx, rcx, portion_chrs_text, PORTION_CHRS_LONG ; seuil charge
-            ligne_de_valeur r15, rdx, OS_CREFR_1, cl, rcx, portion_nonu_text, PORTION_NONU_LONG ; decompte refractaire
-            ligne_de_valeur r15, rdx, OS_BREFR_1, cl, rcx, portion_nonu_text, PORTION_NONU_LONG ; base decompte refractaire
-            ; futur synapse dispo (1)
-            ; futur synapses maxi (2)
-            ligne_de_valeur r15, rdx, OS_VALBB_1, cl, rcx, portion_blcv_text, PORTION_BLCV_LONG ; exploration dx / valeur du bloc de boutons
-            ligne_de_valeur r15, rdx, OS_MASBB_1, cl, rcx, portion_blcp_text, PORTION_BLCP_LONG ; exploration dy / masse du bloc de boutons
-            ligne_de_valeur r15, rdx, OS_DESTN_4, ecx, rcx, portion_dest_text, PORTION_DEST_LONG ; numero de destination
+        dp_ppl: ; portion pulseur
+            ligne_de_valeur rbx, rdx, OS_CHARG0_2, cx, rcx, portion_chro_text ; chrono
+            ligne_de_valeur rbx, rdx, OS_SEUIL_1, cl, rcx, portion_chrl_text ; seuil charge
+            ligne_de_valeur rbx, rdx, OS_BSYNV_1, cl, rcx, portion_blcv_text ; valeur du bloc de boutons
+            ligne_de_valeur rbx, rdx, OS_DESTN_4, ecx, rcx, portion_dest_text ; numero de destination
             jmp dp_fin
-        dp_pm:
-            ligne_de_valeur r15, rdx, 0, cl, rcx, portion_type_mere_text, PORTION_TYPE_MERE_LONG ; type mere
-            ligne_de_valeur r15, rdx, OS_CHARG_2, cx, rcx, portion_chrg_text, PORTION_CHRG_LONG ; charge
-            ligne_de_valeur r15, rdx, OS_SEUIL_2, cx, rcx, portion_chrs_text, PORTION_CHRS_LONG ; seuil charge
-            ligne_de_valeur r15, rdx, OS_CREFR_1, cl, rcx, portion_cref_text, PORTION_CREF_LONG ; decompte refractaire
-            ligne_de_valeur r15, rdx, OS_BREFR_1, cl, rcx, portion_bref_text, PORTION_BREF_LONG ; base decompte refractaire
-            ; futur synapse dispo (1)
-            ; futur synapses maxi (2)
-            ligne_de_valeur r15, rdx, OS_EXPDX_SM_1, cl, rcx, portion_nonu_text, PORTION_NONU_LONG ; exploration dx
-            ligne_de_valeur r15, rdx, OS_EXPDY_SM_1, cl, rcx, portion_nonu_text, PORTION_NONU_LONG ; exploration dy
-            ligne_de_valeur r15, rdx, OS_LIAIS_M_4, ecx, rcx, portion_lias_text, PORTION_LIAS_LONG ; liaison suivante
+        dp_psd: ; portion segment dendritique
+            ligne_de_valeur rbx, rdx, OS_CHARG0_2, cx, rcx, portion_chrg_text ; charge 0 en cours
+            ligne_de_valeur rbx, rdx, OS_CHARG1_2, cx, rcx, portion_chrs_text ; charge 1 ou invalide
+            ligne_de_valeur rbx, rdx, OS_NCACT_1, cl, rcx, portion_ntac_text ; niveau temporel d'activité
+            ligne_de_valeur rbx, rdx, OS_DCEVO_1, cl, rcx, portion_devo_text ; decompte évolution
+            ligne_de_valeur rbx, rdx, OS_CHARG2_2, cx, rcx, portion_chrg_text ; charge 2 ou invalide
+            ligne_de_valeur rbx, rdx, OS_PSYNA_2, cx, rcx, portion_psyn_text ; potentiel synaptique dispo
+            ligne_de_valeur rbx, rdx, OS_PRSEG_1, cl, rcx, portion_pseg_text ; potentiel de segments restants
+            ligne_de_valeur rbx, rdx, OS_SEGNS_4, ecx, rcx, portion_segs_text ; numero segment/neurone suivant
             jmp dp_fin
-        dp_pl:
-            ligne_de_valeur r15, rdx, OS_LIAIS_L_4, ecx, rcx, portion_lias_text, PORTION_LIAS_LONG ; liaison suivante
-            ; vide pour le moment (3)
-            ; futur dx (1)
-            ; futur dy (1)
-            ligne_de_valeur r15, rdx, OS_VALBB_1, cl, rcx, portion_blcv_text, PORTION_BLCV_LONG ; valeur du bloc de boutons
-            ligne_de_valeur r15, rdx, OS_MASBB_1, cl, rcx, portion_blcp_text, PORTION_BLCP_LONG ; masse du bloc de boutons
-            ligne_de_valeur r15, rdx, OS_DESTN_4, ecx, rcx, portion_dest_text, PORTION_DEST_LONG ; numero de destination
+        dp_pn: ; portion neurone
+            ligne_de_valeur rbx, rdx, OS_CHARG0_2, cx, rcx, portion_chrg_text ; charge
+            ligne_de_valeur rbx, rdx, OS_SEUIL_1, cl, rcx, portion_chrs_text ; seuil charge
+            ligne_de_valeur rbx, rdx, OS_CREFR_1, cl, rcx, portion_cref_text ; decompte refractaire
+            ligne_de_valeur rbx, rdx, OS_BREFR_1, cl, rcx, portion_bref_text ; base decompte refractaire
+            ligne_de_valeur rbx, rdx, OS_ORIENT_1, cl, rcx, portion_ornt_text ; orientation des développements
+            ligne_de_valeur rbx, rdx, OS_PRAYO_1, cl, rcx, portion_pray_text ; puissance potentiel rayonnant
+            ligne_de_valeur rbx, rdx, OS_PPLAN_1, cl, rcx, portion_ppla_text ; puissance potentiel planaire
+            ligne_de_valeur rbx, rdx, OS_PAPIC_1, cl, rcx, portion_papi_text ; puissance potentiel apical
+            ligne_de_valeur rbx, rdx, OS_PPANI_1, cl, rcx, portion_ppan_text ; puissance potentiel ppanier
+            ligne_de_valeur rbx, rdx, OS_PAXON_1, cl, rcx, portion_paxo_text ; puissance potentiel axonal
+            ligne_de_valeur rbx, rdx, OS_EXTAX_4, ecx, rcx, portion_eaxo_text ; première extension axonale
             jmp dp_fin
+        dp_pea: ; portion extension axonale
+            ligne_de_valeur rbx, rdx, OS_BSYNM_1, cl, rcx, portion_blcp_text ; masse du bloc de boutons
+            ligne_de_valeur rbx, rdx, OS_BSYNV_1, cl, rcx, portion_blcv_text ; valeur du bloc de boutons
+            ligne_de_valeur rbx, rdx, OS_NCACT_1, cl, rcx, portion_ntac_text ; niveau temporel d'activité
+            ligne_de_valeur rbx, rdx, OS_DCEVO_1, cl, rcx, portion_devo_text ; decompte évolution
+            ligne_de_valeur rbx, rdx, OS_DESTN_4, ecx, rcx, portion_dest_text ; numero de destination
+            ligne_de_valeur rbx, rdx, OS_PREXT_1, cl, rcx, portion_pext_text ; potentiel d'extensions restantes
+            ligne_de_valeur rbx, rdx, OS_EXTAX_4, ecx, rcx, portion_eaxo_text ; extension axonale suivante
+            jmp dp_fin
+        ; -----------------------------------------------------------------------------------------------
         dp_fin:
         ; ---------- recuperation registres
-            pop rax
-            pop rcx
             pop rdx
-            pop r13
-            pop r14
-            pop r15
+            pop rcx
+            pop rbx
+            pop rax
+            add rsp, 8
         ; ----- sortie
+        ret
+    ecrire_messages_console:
+        sub rsp, 8
+        ; recuperer le handle de sortie standard
+        call_winapi64_style GetStdHandle, STD_OUTPUT_HANDLE
+        mov r15, rax
+
+        ; repositionner le curseur
+        ; call_winapi64_style SetConsoleCursorPosition, r15, 0h00090005
+        ; obtenir les informations du tampon de la console
+        ; lea rax, [csbi]
+        ; call_winapi64_style GetConsoleScreenBufferInfo, r15, rax
+        ; calculer la taille de la console (lignes * colonnes)
+        ; movzx rax, word [csbi + 4]      ; Charger la largeur (dwSize.X)
+        ; movzx rcx, word [csbi + 6]      ; Charger la hauteur (dwSize.Y)
+        ; imul rax, rcx                   ; Multiplier pour obtenir la taille totale en caractères
+        ; remplir la console avec des espaces
+        ; lea rdx, [written]
+        ; call_winapi64_style FillConsoleOutputCharacterA, r15, 44, 100, 0h00090005, rdx
+        ; call FillConsoleOutputAttribute
+
+        call_datapush_style ecrire_ligne_3, r15, interparagraphes_text, -1 ; interparagraphes
+        call_datapush_style ecrire_ligne_3, r15, texte_numero_de_boucle, qword [bouclage_lent_actuel] ; numéro de boucle
+        call_datapush_style ecrire_ligne_3, r15, texte_duree_de_boucle, qword [dureeDeTraitement] ; durée de boucle
+
+        ; Detailler eventuellement dans la console
+        xor rax, rax
+        mov al, [detailConsole]
+        test rax, rax
+        jz ne_pas_detailler
+            call detailler_portion
+        ne_pas_detailler:
+        call_datapush_style ecrire_ligne_3, r15, interparagraphes_text, -1 ; interligne
+        add rsp, 8
         ret
 ; -------------------------------------------------------------------------------------------- OUTILS POUR CREATIONS INITIALES
     ; Appels : push param1, param2, param3, ... + call + add rsp, nbParams*8
     ; Outils
-    sub_adresse_de_numero: ; calcul de l'adresse d'une portion (1 argument)
-            ; Arguments : NumeroDePortion->AdresseDePortion
+    sub_adresse_de_numero_1: ; calcul de l'adresse d'une portion (Num->Adr)
+        ; Arguments : NumeroDePortion->AdresseDePortion
         ; ----- sauvegarde des registres utilises
-            push r11
-            push rax
-            sub rsp, 8 ; alignement de la pile
+        push rdx
+        push rax
+        sub rsp, 8 ; alignement de la pile
         ; ----- recuperation des parametres
-            mov rax, [rsp+8*(3+1)] ; p1 IN = numero portion / OUT = adresse portion
+        mov rax, [rsp+8*(3+1)]
         ; ----- conversion numero en adresse
-            adresse_from_numero r11, rax
-        ; ----- sauvegarde des valeurs de retour
-            mov [rsp+8*(3+1)], r11
+        adresse_from_numero rdx, rax
+        ; ----- sauvegarde de la valeur de retour
+        mov [rsp+8*(3+1)], rdx
         ; ----- recuperation des registres
-            add rsp, 8
-            pop rax
-            pop r11
+        add rsp, 8
+        pop rax
+        pop rdx
         ; ----- sortie
+        ret
+    sub_virginiser_portion: ; remettre tous paramètres de portion à zéro
+        ; Arguments : AdresseDePortion
+        ; A_FAIRE : faire ça par boucle sur chaque octet
+        ; ----- sauvegarde des registres utilises
+        push rdx
+        ; ----- recuperation des parametres
+        mov rdx, [rsp+8*(1+1)]
+        and qword [rdx], 0b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000
+        and qword [rdx+8], 0b0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000_0000
+        ; ----- recuperation des registres
+        pop rdx
+        ; ----- sortie
+        ret
+    sub_numero_de_xyz: ; calcule le numero de portion à partir de x, y et z (x,y,z->Num)
+        ; Arguments : x,y,z->NumeroDePortion
+        ; ----- sauvegarde des registres utilises
+        push rax
+        push rbx
+        sub rsp, 8 ; alignement de la pile
+        ; ----- parametres et calculs
+        mov rbx, [rsp+8*(3+1)] ; z
+        shl rbx, DECALAGE_Y
+        mov rax, [rsp+8*(3+2)] ; y
+        add rbx, rax
+        shl rbx, DECALAGE_X
+        mov rax, [rsp+8*(3+3)] ; x
+        add rbx, rax
+        ; ----- sauvegarde de la valeur de retour
+        mov [rsp+8*(3+1)], rbx
+        ; ----- recuperation des registres
+        add rsp, 8
+        pop rbx
+        pop rax
+        ; ----- sortie
+
+
         ret
     ; Creations unitaires
-    sub_creer_portion_lecteur: ; creation d'une portion de lecture (Num/Adr/LgSeg/NbSeg/Index/Bit/Persist/ValBloc/Dest)
-            ; Arguments : NumeroDePortion / AdresseMemoire / LargeurDeSegment / NombreDeSegments
-            ; / IndexActuel / BitALire / PersistanceDeBase / ValeurDuBloc / PortionDeDestination
+    sub_creer_portion_datasource_4: ; creation d'une portion de source de données (Num/Adr/LargSeg/NbrSeg)
+        ; Arguments : NumeroDePortion / AdresseDesDonnées / LargeurDeSegment / NombreDeSegments
         ; ----- sauvegarde des registres utilises + alignement de la pile
-            push r10
-            push rax
-            sub rsp, 8
+        push rdx
+        push rax
+        sub rsp, 8 ; alignement de la pile
         ; ----- adresse de base de la paire de portions
-            mov r10, [rsp+8*(3+9)] ; numero de portion a creer => adresse de portion
-            push rax
-            push r10
-            call sub_adresse_de_numero
-            pop r10
-            pop rax
+        mov rdx, [rsp+8*(3+4)] ; numero de portion a creer
+        ; ----- calcul adresse
+        sub rsp, 8 ; pré-alignement de la pile
+        push rdx ; envoi numéro
+        call sub_adresse_de_numero_1
+        pop rdx ; retour adresse
+        ; add rsp, 8 ; ré-alignement de la pile
+        ; ----- raz portion
+        ; sub rsp, 8 ; pré-alignement de la pile
+        push rdx
+        call sub_virginiser_portion
+        add rsp, 16 ; ré-alignement de la pile
         ; ----- enregistrement des donnees
             ;
-            mov [r10+0], byte TYPE_LECTEUR ; type de portion
+            mov [rdx+OS_TYPEVSA_1], byte TYPE_SOURCE
             ;
-            mov rax, [rsp+8*(3+8)]
-            mov [r10+1], qword rax ; adresse de lecture
+            mov rax, [rsp+8*(3+3)]
+            mov [rdx+OS_ADDRS_8], rax ; adresse mémoire des données
+            ;
+            mov rax, [rsp+8*(3+2)]
+            mov [rdx+OS_LGSEG_1], al ; largeur de segment
+            ;
+            mov rax, [rsp+8*(3+1)]
+            mov [rdx+OS_NBSEG_2], ax ; nombre de segments
+            ;
+        ; ----- recuperation des registres
+        add rsp, 8 ; re-alignement de la pile
+        pop rax
+        pop rdx
+        ; ----- sortie
+        ret
+    sub_creer_portion_lecteur_7: ; creation d'une portion de lecture (Num/IdxLect/NumBit/ValBB/PersBase/NumDataSrc/Dest)
+            ; Arguments : NumeroDePortion / IndexLecture / NumeroDeBit / ValeurBlocBoutons / PersistanceDeBase / PortionData / Destination
+        ; ----- sauvegarde des registres utilises + alignement de la pile
+        push rdx
+        push rax
+        sub rsp, 8 ; alignement de la pile
+        ; ----- adresse de base de la paire de portions
+        mov rdx, [rsp+8*(3+7)] ; numero de portion a creer
+        ; ----- calcul adresse
+        sub rsp, 8 ; pré-alignement de la pile
+        push rdx ; envoi numéro
+        call sub_adresse_de_numero_1
+        pop rdx ; retour adresse
+        ; add rsp, 8 ; ré-alignement de la pile
+        ; ----- raz portion
+        ; sub rsp, 8 ; pré-alignement de la pile
+        push rdx
+        call sub_virginiser_portion
+        add rsp, 16 ; ré-alignement de la pile
+        ; ----- enregistrement des donnees
+            ;
+            mov [rdx+OS_TYPEVSA_1], byte TYPE_LECTEUR ; type de portion
             ;
             mov rax, [rsp+8*(3+6)]
-            mov [r10+9], word ax ; nombre de segments de l'enregistrement
+            mov [rdx+OS_INDEX_2], ax ; index de lecture
+            ;
+            mov rax, [rsp+8*(3+5)]
+            mov [rdx+OS_NMBIT_1], al ; numero de bit à lire
+            ;
+            mov rax, [rsp+8*(3+4)]
+            mov [rdx+OS_BSYNV_1], al ; valeur du bloc de boutons
+            ;
+            mov rax, [rsp+8*(3+3)]
+            mov [rdx+OS_PERSB_1], al ; persistance de base
+            ;
+            mov rax, [rsp+8*(3+2)]
+            mov [rdx+OS_PAMEM_4], eax ; numero de portion des parametres d'accès mémoire
+            ;
+            mov rax, [rsp+8*(3+1)]
+            mov [rdx+OS_DESTN_4], eax ; portion de destination
+            ;
+        ; ----- recuperation des registres
+        add rsp, 8
+        pop rax
+        pop rdx
+        ; ----- sortie
+        ret
+    sub_creer_portion_pulseur_4: ; creation d'une portion pulseur (Num/PuissSeuil/ValBloc/Dest)
+        ; Arguments : NumeroDePortion / PuissanceSeuilChrono / ValeurBlocBoutons / PortionDeDestination
+        ; ----- sauvegarde des registres utilises + alignement de la pile
+        push rdx
+        push rax
+        sub rsp, 8 ; alignement de la pile
+        ; ----- adresse de base de la paire de portions
+        mov rdx, [rsp+8*(3+4)] ; numero de portion a creer
+        ; ----- calcul adresse
+        sub rsp, 8 ; pré-alignement de la pile
+        push rdx ; envoi numéro
+        call sub_adresse_de_numero_1
+        pop rdx ; retour adresse
+        ; add rsp, 8 ; ré-alignement de la pile
+        ; ----- raz portion
+        ; sub rsp, 8 ; pré-alignement de la pile
+        push rdx
+        call sub_virginiser_portion
+        add rsp, 16 ; ré-alignement de la pile
+        ; ----- enregistrement des donnees
+            ;
+            mov [rdx+OS_TYPEVSA_1], byte TYPE_PULSEUR
+            ;
+            mov rax, [rsp+8*(3+3)]
+            mov [rdx+OS_SEUIL_1], al ; puissance seuil chrono
+            ;
+            mov rax, [rsp+8*(3+2)]
+            mov [rdx+OS_BSYNV_1], al ; valeur du bloc de boutons
+            ;
+            mov rax, [rsp+8*(3+1)]
+            mov [rdx+OS_DESTN_4], dword eax ; numero de portion de destination
+            ;
+        ; ----- recuperation des registres
+        add rsp, 8 ; re-alignement de la pile
+        pop rax
+        pop rdx
+        ; ----- sortie
+        ret
+    sub_creer_segment_dendritique_7: ; creation d'un segment dendritique (Type/Num/NivTemp/DecEvo/SynaptDispo/PotSegRestant/SegSuivant)
+        ; Pour création intiale : TYPE_SEGMENT_GERME / NumeroDePortion / NivTemporel / DecompteEvo / SynapsesRest / PotRest / 0
+        ; Pour création forcée : TYPE_SEGMENT_COMPLET / NumeroDePortion / NivTemporel / 0 / 0 / 0 / SegmentSuivant
+        ; ----- sauvegarde des registres utilises + alignement de la pile
+        push rdx
+        push rax
+        sub rsp, 8 ; alignement pile
+        ; ----- adresse de travail
+        mov rdx, [rsp+8*(3+6)] ; numero de portion a creer
+        sub rsp, 8 ; pré-alignement de la pile
+        push rdx
+        call sub_adresse_de_numero_1
+        pop rdx
+        ; add rsp, 8 ; ré-alignement de la pile
+        ; ----- raz portion
+        ; sub rsp, 8 ; pré-alignement de la pile
+        push rdx
+        call sub_virginiser_portion
+        add rsp, 16 ; ré-alignement de la pile
+        ; ----- enregistrement des données
             ;
             mov rax, [rsp+8*(3+7)]
-            mov [r10+11], byte al ; largeur de segment en octets
-            ;
-            mov [r10+TAILLE_DES_PORTIONS+0], byte TYPE_CONSECUTIF ; type de portion consecutive
+            mov [rdx+OS_TYPEVSA_1], al ; type
             ;
             mov rax, [rsp+8*(3+5)]
-            mov [r10+TAILLE_DES_PORTIONS+1], word ax ; index initial de segment
-            ;
-            mov rax, [rsp+8*(3+2)]
-            mov [r10+TAILLE_DES_PORTIONS+3], byte al ; persistance en cours
+            mov [rdx+OS_NCACT_1], al ; niveau temporel d'activité
             ;
             mov rax, [rsp+8*(3+4)]
-            mov [r10+TAILLE_DES_PORTIONS+4], byte al ; bit a lire dans le segment
-            ;
-            mov rax, [rsp+8*(3+2)]
-            mov [r10+TAILLE_DES_PORTIONS+5], byte al ; valeur bloc de boutons
+            mov [rdx+OS_DCEVO_1], al ; décompte d'évolution
             ;
             mov rax, [rsp+8*(3+3)]
-            mov [r10+TAILLE_DES_PORTIONS+6], byte al ; persistance de base
-            ;
-            ; +7 = N/U
-            ;
-            mov rax, [rsp+8*(3+1)] ; portion de destination
-            mov [r10+TAILLE_DES_PORTIONS+8], dword eax
-            ;
-        ; ----- recuperation des registres
-            add rsp, 8
-            pop rax
-            pop r10
-        ; ----- sortie
-        ret
-    sub_creer_portion_pulseur: ; creation d'une portion pulseur (Num/Seuil/ValBloc/Dest)
-            ; Arguments : NumeroDePortion / SeuilChrono / BlocBoutons / PortionDeDestination
-        ; ----- sauvegarde des registres utilises + alignement de la pile
-            push r10
-            push rax
-            sub rsp, 8
-        ; ----- adresse de base de la paire de portions
-            mov r10, [rsp+8*(3+4)] ; numero de portion a creer => adresse de portion
-            sub rsp, 8
-            push r10
-            call sub_adresse_de_numero
-            pop r10
-            add rsp, 8
-        ; ----- enregistrement des donnees
-            ;
-            mov [r10], byte TYPE_PULSEUR
-            ;
-            mov [r10+OS_CHARG_2], word 0 ; chrono actuel
-            ;
-            mov rax, [rsp+8*(3+3)]
-            mov [r10+OS_SEUIL_2], word ax ; seuil chrono
+            mov [rdx+OS_PSYNA_2], ax ; nombre de synapses disponibles
             ;
             mov rax, [rsp+8*(3+2)]
-            mov [r10+OS_VALBB_1], byte al ; valeur du bloc de boutons
-            ;
-            ; +6 = N/U
-            ;
-            ; +7 = N/U
+            mov [rdx+OS_PRSEG_1], al ; potentiel de segments restants
             ;
             mov rax, [rsp+8*(3+1)]
-            mov [r10+OS_DESTN_4], dword eax ; numero de portion de destination
+            mov [rdx+OS_SEGNS_4], eax ; segment ou neurone suivant
             ;
         ; ----- recuperation des registres
-            add rsp, 8
-            pop rax
-            pop r10
+        add rsp, 8
+        pop rax
+        pop rdx
         ; ----- sortie
         ret
-    sub_creer_portion_simple: ; creation d'une portion simple (Num/Charge/Seuil/ValBloc/MasseBloc/DRefract/Dest)
-        ; Arguments : NumeroDePortion / ChargeInitiale / Seuil / ValeurDuBloc / MasseDuBloc / DureeRefractaire / PortionDeDestination
+    sub_creer_portion_neurone_10: ; creation d'une portion neurone (Type/Num/PuissSeuil/BaseRef/PRay/PPlan/PApi/PPan/PAxo/ExtAxo)
+        ; Pour création initiale : TYPE_NEURONE_GERME / NumeroPortion / PuissSeuil / BaseRefract / PRay / PPlan / PApi / PPan / PAxo / 0
+        ; Pour création forcée : TYPE_NEURONE_COMPLET / NumeroPortion / PuissSeuil / BaseRefract / 0 / 0 / 0 / 0 / 0 / ExtensionAxonale
         ; ----- sauvegarde des registres utilises + alignement de la pile
-            push r10
-            push rax
-            sub rsp, 8
+        push rdx
+        push rax
+        sub rsp, 8 ; alignement pile
         ; ----- adresse de travail
-            mov r10, [rsp+8*(3+7)] ; numero de portion a creer
-            sub rsp, 8
-            push r10
-            call sub_adresse_de_numero
-            pop r10
-            add rsp, 8
-        ; ----- parametres
+        mov rdx, [rsp+8*(3+9)] ; numero de portion a creer
+        sub rsp, 8 ; pré-alignement de la pile
+        push rdx
+        call sub_adresse_de_numero_1
+        pop rdx
+        ; add rsp, 8 ; ré-alignement de la pile
+        ; ----- raz portion
+        ; sub rsp, 8 ; pré-alignement de la pile
+        push rdx
+        call sub_virginiser_portion
+        add rsp, 16 ; ré-alignement de la pile
+        ; ----- enregistrement des données
+        ;
+        mov rax, [rsp+8*(3+10)]
+        mov [rdx+OS_TYPEVSA_1], al ; type
+        ;
+        mov rax, [rsp+8*(3+8)]
+        mov [rdx+OS_SEUIL_1], al ; puissance seuil charge
+        ;
+        mov rax, [rsp+8*(3+7)]
+        mov [rdx+OS_BREFR_1], al ; base refractaire
+        ;
+        mov rax, [rsp+8*(3+6)]
+        mov [rdx+OS_PRAYO_1], al ; potentiel dendrites rayonnantes
+        ;
+        mov rax, [rsp+8*(3+5)]
+        mov [rdx+OS_PPLAN_1], al ; potentiel dendrites rayonnantes
+        ;
+        mov rax, [rsp+8*(3+4)]
+        mov [rdx+OS_PAPIC_1], al ; potentiel dendrites rayonnantes
+        ;
+        mov rax, [rsp+8*(3+3)]
+        mov [rdx+OS_PPANI_1], al ; potentiel dendrites rayonnantes
+        ;
+        mov rax, [rsp+8*(3+2)]
+        mov [rdx+OS_PAXON_1], al ; potentiel extension axonale
+        ;
+        mov rax, [rsp+8*(3+1)]
+        mov [rdx+OS_EXTAX_4], eax ; numero portion extension axonale        ;
+        ; ----- recuperation des registres
+        add rsp, 8
+        pop rax
+        pop rdx
+        ; ----- sortie
+        ret
+    sub_creer_extension_axonale_8: ; creation d'une extension axonale (Type/Num/MasBB/ValBB/NivTemp/Dest/PotAxoRestant/ExtSuivante)
+        ; Pour création intiale : TYPE_EXTENSION_GERME / NumeroDePortion / 0 / 0 / 0 / 0 / PotAxoRest / 0
+        ; Pour création forcée : TYPE_EXTENSION_COMPLET / NumeroDePortion / MasseBB / ValBB / NivTemporel / Dest / 0 / SegmentSuivant
+        ; ----- sauvegarde des registres utilises + alignement de la pile
+        push rdx
+        push rax
+        sub rsp, 8 ; alignement pile
+        ; ----- adresse de travail
+        mov rdx, [rsp+8*(3+7)] ; numero de portion a creer
+        sub rsp, 8 ; pré-alignement de la pile
+        push rdx
+        call sub_adresse_de_numero_1
+        pop rdx
+        ; add rsp, 8 ; ré-alignement de la pile
+        ; ----- raz portion
+        ; sub rsp, 8 ; pré-alignement de la pile
+        push rdx
+        call sub_virginiser_portion
+        add rsp, 16 ; ré-alignement de la pile
+        ; ----- enregistrement des données
             ;
-            mov [r10], byte TYPE_SIMPLE_NONACTIVEE
+            mov rax, [rsp+8*(3+8)]
+            mov [rdx+OS_TYPEVSA_1], al ; type
             ;
             mov rax, [rsp+8*(3+6)]
-            mov [r10+OS_CHARG_2], word ax ; charge actuelle
+            mov [rdx+OS_BSYNM_1], al ; masse du bloc de boutons
             ;
             mov rax, [rsp+8*(3+5)]
-            mov [r10+OS_SEUIL_2], word ax ; seuil charge
+            mov [rdx+OS_BSYNV_1], al ; valeur du bloc de boutons
             ;
             mov rax, [rsp+8*(3+4)]
-            mov [r10+OS_VALBB_1], byte al ; valeur du bloc de boutons
+            mov [rdx+OS_NCACT_1], al ; niveau temporel d'activité
             ;
             mov rax, [rsp+8*(3+3)]
-            mov [r10+OS_MASBB_1], byte al ; masse du bloc de boutons
+            mov [rdx+OS_DESTN_4], eax ; destination
             ;
             mov rax, [rsp+8*(3+2)]
-            mov [r10+OS_CREFR_1], byte al ; duree refractaire
+            mov [rdx+OS_PREXT_1], al ; potentiel d'extensions restantes
             ;
             mov rax, [rsp+8*(3+1)]
-            mov [r10+OS_DESTN_4], dword eax ; numero de portion de destination
+            mov [rdx+OS_EXTAX_4], eax ; segment ou neurone suivant
             ;
         ; ----- recuperation des registres
-            add rsp, 8
-            pop rax
-            pop r10
+        add rsp, 8
+        pop rax
+        pop rdx
         ; ----- sortie
-        ret
-    sub_creer_portion_mere: ; creation d'une portion mere (Num/Charge/Seuil/DRefract/LSuiv)
-            ; NumeroDePortion / ChargeInitiale / SeuilStandard / DureeRefractaire / PortionSuivante
-        ; ----- sauvegarde des registres utilises + alignement de la pile
-            push r10
-            push rax
-            sub rsp, 8
-        ; ----- adresse de travail
-            mov r10, [rsp+8*(3+5)] ; numero de portion a creer -> adresse
-            sub rsp, 8
-            push r10
-            call sub_adresse_de_numero
-            pop r10
-            add rsp, 8
-        ; ----- parametres
-            ;
-            mov [r10], byte TYPE_MERE
-            ;
-            mov rax, [rsp+8*(3+4)]
-            mov [r10+OS_CHARG_2], word ax ; charge actuelle
-            ;
-            mov rax, [rsp+8*(3+3)]
-            mov [r10+OS_SEUIL_2], word ax ; seuil de declenchement
-            ;
-            mov rax, 0
-            mov [r10+OS_EXPDX_SM_1], byte al ; exploration axone dx
-            ;
-            mov rax, 0
-            mov [r10+OS_EXPDY_SM_1], byte al ; exploration axone dy
-            ;
-            mov rax, 0
-            mov [r10+OS_CREFR_1], byte al ; duree refractaire
-            ;
-            mov rax, [rsp+8*(3+2)]
-            mov [r10+OS_BREFR_1], byte al ; duree refractaire
-            ;
-            mov rax, [rsp+8*(3+1)]
-            mov [r10+OS_LIAIS_M_4], dword eax ; numero de suivant
-            ;
-        ; ----- recuperation des registres
-            add rsp, 8
-            pop rax
-            pop r10
-        ; ----- sortie
-        ret
-    sub_creer_portion_liaison: ; creation d'une portion de liaison (Num/ValBloc/MasseBloc/Dest/LSuiv)
-            ; Arguments : NumeroDePortion / ValeurBoutons / MasseBoutons / PortionDeDestination / PortionSuivante
-        ; ----- sauvegarde des registres utilises + alignement de la pile
-            push r10
-            push rax
-            sub rsp, 8
-        ; ----- adresse de travail
-            mov r10, [rsp+8*(3+5)] ; numero de portion a creer
-            sub rsp, 8
-            push r10
-            call sub_adresse_de_numero
-            pop r10
-            add rsp, 8
-        ; ----- Parametres
-            ;
-            mov [r10], byte TYPE_LIAISON_NONACTIVEE
-            ;
-            mov rax, [rsp+8*(3+1)]
-            mov [r10+OS_LIAIS_L_4], dword eax ; numero de suivant
-            ;
-            mov rax, [rsp+8*(3+4)]
-            mov [r10+OS_VALBB_1], byte al ; valeur de bloc de boutons
-            ;
-            mov rax, [rsp+8*(3+3)]
-            mov [r10+OS_MASBB_1], byte al ; masse du bloc de boutons
-            ;
-            ; +7 = N/U
-            ;
-            mov rax, [rsp+8*(3+2)]
-            mov [r10+OS_DESTN_4], dword eax ; numero de portion de destination
-        ; ----- recuperation des registres
-            add rsp, 8
-            pop rax
-            pop r10
-        ; ----- sortie
-        ret
-    ; Creation de segments
-    sgt_hrz_lecture_std_GD: ; creation d'un segment horizontal de lecture standard G->D (Num/Adr/NbSeg/Index/Dest)
-            ; Arguments : NumeroDePortion / AdresseMemoire / NombreDeSegments / IndexActuel / PortionDeDestination
-        ; ----- sauvegarde des registres utilises (alignement pile inclus)
-            push r10
-            push r11
-            push rcx
-            push rax
-            sub rsp, 8
-        ; variables
-            mov rcx, 0 ; index de bit
-            mov r10, [rsp+8*(5+5)] ; premiere portion a creer
-            mov r11, [rsp+8*(5+1)] ; premiere portion de destination
-        ; ----- boucle
-            shlsGD_bit:
-                ; +0
-                sub rsp, 8 ; pre-alignement de la pile
-                ; +1
-                push r10 ; numero de portion a creer
-                ; +2
-                mov rax, [rsp+8*(5+2+4)]
-                push rax ; adresse memoire
-                ; +3
-                push TAILLE_SEGMENT_STANDARD ; taille de segment
-                ; +4
-                mov rax, [rsp+8*(5+4+3)]
-                push rax ; nombre de segments
-                ; +5
-                mov rax, [rsp+8*(5+5+2)]
-                push rax ; index de lecture
-                ; +6
-                push rcx ; bit a lire
-                ; +7
-                push PERSISTANCE_STANDARD ; persistance
-                ; +8
-                push VALEUR_BOUTONS_LECTEUR ; valeur de bloc
-                ; +9
-                push r11 ; portion destination
-                ; +10
-                ; Num/Adr/LgSeg/NbSeg/Index/Bit/Persist/ValBloc/Dest
-                call sub_creer_portion_lecteur
-                add rsp, 10*8
-                ;
-                add r10, 2
-                add r11, 1 ; 1 si on veut des sorties qui se suivent, sinon, au meme pas 2
-                inc rcx
-                cmp rcx, TAILLE_SEGMENT_STANDARD*8
-            jne shlsGD_bit
-            add rsp, 8
-            pop rax
-            pop rcx
-            pop r11
-            pop r10
-        ret
-    sgt_vrt_simples_std_GD: ; creation d'un segment vertical de simples standard G->D (Num/Nbr/Dest)
-            ; Arguments : NumeroDePortion / Nombre / PortionDeDestination
-        ; ----- sauvegarde des registres utilises (alignement pile inclus)
-            push r10
-            push r11
-            push rcx
-            push rax
-            sub rsp, 8
-        ; variables
-            mov rcx, [rsp+8*(5+2)] ; compteur
-            mov r10, [rsp+8*(5+3)] ; premiere portion a creer
-            mov r11, [rsp+8*(5+1)] ; premiere portion de destination
-        ; ----- boucle
-            svssGD_compteur:
-                ; +0
-                sub rsp, 8 ; pre-alignement de la pile
-                ; +1
-                push r10 ; numero de portion a creer
-                ; +2
-                push CHARGE_INITIALE ; charge
-                ; +3
-                push SEUIL_STANDARD ; seuil
-                ; +4
-                push VALEUR_BOUTONS_STANDARD ; valeur du bloc
-                ; +5
-                push MASSE_BOUTONS_STANDARD ; masse du bloc
-                ; +6
-                push DUREE_REFRACTAIRE ; duree refractaire
-                ; +7
-                push r11 ; portion destination
-                ; +8
-                ; Num/Charge/Seuil/ValBloc/MasseBloc/DRefract/Dest
-                call sub_creer_portion_simple
-                add rsp, 8*8
-                ;
-                add r10, LARGEUR_DE_COUCHE
-                cmp r11, 0
-                je svssGD_noDest
-                    add r11, LARGEUR_DE_COUCHE
-                svssGD_noDest:
-                dec rcx
-                cmp rcx, 0
-            jne svssGD_compteur
-        ; recuperation des registres
-            add rsp, 8
-            pop rax
-            pop rcx
-            pop r11
-            pop r10
-        ; sortie
-        ret
-    sgt_vrt_m_plus_l_std_GD: ; creation d'un segment vertical de mere+liaisons standard G->D (Mere/Liaisons/Nbr/Dest)
-            ; Arguments : NumeroDePortionMere / NumeroDePortionLiaison / Nombre / PortionDeDestination
-        ; ----- sauvegarde des registres utilises (alignement pile inclus)
-            push r10
-            push r11
-            push rcx
-            push rax
-            sub rsp, 8
-        ; ----- mere
-            ; +0
-            sub rsp, 8 ; pre-alignement de la pile
-            ; +1
-            mov rax, [rsp+8*(5+1+4)] ; portion mere
-            push rax ; numero de portion a creer
-            ; +2
-            push CHARGE_INITIALE ; charge
-            ; +3
-            push SEUIL_STANDARD ; seuil
-            ; +4
-            push DUREE_REFRACTAIRE ; duree refractaire
-            ; +5
-            mov rax, [rsp+8*(5+5+3)] ; premiere portion de liaison
-            push rax
-            ; +6
-            ; Num/Charge/Seuil/DRefract/LSuiv
-            call sub_creer_portion_mere
-            add rsp, 6*8
-        ; ----- variables
-            mov rcx, [rsp+8*(5+2)] ; compteur
-            mov r10, [rsp+8*(5+3)] ; premiere portion de liaison
-            mov r11, [rsp+8*(5+1)] ; premiere portion de destination
-        ; ----- boucle liaisons
-            svmplsGD_compteur:
-                ; +0
-                sub rsp, 8 ; pre-alignement de la pile
-                ; +1
-                push r10 ; numero de portion a creer
-                ; +2
-                push VALEUR_BOUTONS_LIAISONS ; valeur du bloc
-                ; +3
-                push MASSE_BOUTONS_STANDARD ; masse du bloc
-                ; +4
-                push r11 ; portion destination
-                add r11, LARGEUR_DE_COUCHE ; incrementation de la destination
-                ; +5
-                add r10, LARGEUR_DE_COUCHE ; incrementation de la liaison
-                push r10 ; numero de portion a creer
-                ; +6
-                ; Num/ValBloc/MasseBloc/Dest/LSuiv
-                call sub_creer_portion_liaison
-                add rsp, 6*8
-                ;
-                dec rcx
-                cmp rcx, 0
-            jne svmplsGD_compteur
-        ; ecrasement de la derniere liaison pour ne pas avoir de suivante
-            sub r10, LARGEUR_DE_COUCHE
-            sub r11, LARGEUR_DE_COUCHE
-            make_a_call sub_creer_portion_liaison, r10, VALEUR_BOUTONS_LIAISONS, MASSE_BOUTONS_STANDARD, r11, 0
-        ; recuperation des registres
-            add rsp, 8
-            pop rax
-            pop rcx
-            pop r11
-            pop r10
-        ; sortie
-        ret
-    ; Creation de diffuseurs
-    dif_hrz_m_plus_l_std_GD: ; creation d'un cone de diffusion horizontal de mere+liaisons G->D (Mere/Liaisons/Nbr/Dest)
-            ; Arguments : NumeroDePortionMere / NumeroDePortionLiaison / Nombre / PortionDeDestination
-        ; ----- sauvegarde des registres utilises (alignement pile inclus)
-            push r10
-            push r11
-            push rcx
-            push rax
-            sub rsp, 8
-        ; ----- mere
-            ; +0
-            sub rsp, 8 ; pre-alignement de la pile
-            ; +1
-            mov rax, [rsp+8*(5+1+4)] ; portion mere
-            push rax ; numero de portion a creer
-            ; +2
-            push CHARGE_INITIALE ; charge
-            ; +3
-            push SEUIL_STANDARD ; seuil
-            ; +4
-            push DUREE_REFRACTAIRE ; duree refractaire
-            ; +5
-            mov rax, [rsp+8*(5+5+3)] ; premiere portion de liaison
-            push rax
-            ; +6
-            ; Num/Charge/Seuil/DRefract/LSuiv
-            call sub_creer_portion_mere
-            add rsp, 6*8
-        ; ----- variables
-            mov rcx, [rsp+8*(5+2)] ; compteur
-            mov r10, [rsp+8*(5+3)] ; premiere portion de liaison
-            mov r11, [rsp+8*(5+1)] ; premiere portion de destination
-        ; ----- boucle liaisons
-            dhmplsGD_compteur:
-                ; +0
-                sub rsp, 8 ; pre-alignement de la pile
-                ; +1
-                push r10 ; numero de portion a creer
-                ; +2
-                push VALEUR_BOUTONS_LIAISONS ; valeur du bloc
-                ; +3
-                push MASSE_BOUTONS_STANDARD ; masse du bloc
-                ; +4
-                push r11 ; portion destination
-                add r11, LARGEUR_DE_COUCHE ; incrementation de la destination
-                ; +5
-                add r10, 1 ; incrementation de la liaison
-                push r10 ; numero de portion a creer
-                ; +6
-                ; Num/ValBloc/MasseBloc/Dest/LSuiv
-                call sub_creer_portion_liaison
-                add rsp, 6*8
-                ;
-                dec rcx
-                cmp rcx, 0
-            jne dhmplsGD_compteur
-        ; ecrasement de la derniere liaison pour ne pas avoir de suivante
-            sub r10, 1
-            sub r11, LARGEUR_DE_COUCHE
-            make_a_call sub_creer_portion_liaison, r10, VALEUR_BOUTONS_LIAISONS, MASSE_BOUTONS_STANDARD, r11, 0
-        ; recuperation des registres
-            add rsp, 8
-            pop rax
-            pop rcx
-            pop r11
-            pop r10
-        ; sortie
-        ret
-    ; Creation de groupes
-    pqt_lecture_std_GD: ; creation d'un paquet de lecture vertical standard (Num/Adr/NbSeg/Index/Haut/Dest)
-            ; Arguments : NumeroDePortion / AdresseMemoire / NombreDeSegments / IndexActuel / HauteurDuPaquet / PortionDeDestination
-        ; ----- sauvegarde des registres utilises (alignement pile inclus)
-            push r10
-            push r11
-            push r12
-            push rcx
-            push rax
-        ; variables
-            mov r10, [rsp+8*(5+6)] ; premiere portion a creer
-            mov r11, [rsp+8*(5+1)] ; premiere portion de destination
-            mov r12, [rsp+8*(5+3)] ; index de segment
-            mov rcx, [rsp+8*(5+2)] ; nombre de lignes a creer
-        ; ----- boucle
-            plsGD_compteur:
-                ; +0
-                sub rsp, 8 ; pre-alignement de la pile
-                ; +1
-                push r10 ; numero de portion a creer
-                ; +2
-                mov rax, [rsp+8*(5+2+5)]
-                push rax ; adresse memoire
-                ; +3
-                mov rax, [rsp+8*(5+3+4)]
-                push rax ; nombre de segments
-                ; +4
-                push r12 ; index de segments
-                ; +5
-                push r11 ; portion destination
-                ; +6
-                ; Num/Adr/NbSeg/Index/Dest
-                call sgt_hrz_lecture_std_GD
-                add rsp, 6*8
-                ;
-                add r10, LARGEUR_DE_COUCHE
-                add r11, LARGEUR_DE_COUCHE
-                inc r12
-                dec rcx
-                cmp rcx, 0
-            jne plsGD_compteur
-            pop rax
-            pop rcx
-            pop r12
-            pop r11
-            pop r10
         ret
 
-    pqt_simples_std_GD: ; creation d'un paquet de lecture vertical standard (Num/NbrH/NbrV/Dest)
-            ; Arguments : NumeroDePortion / NombreALHorizontale / NombreALaVerticale / PortionDeDestination
-        ; ----- sauvegarde des registres utilises (alignement pile inclus)
-            push r10
-            push r11
-            push rcx
-            push rax
-            sub rsp, 8
-        ; variables
-            mov r10, [rsp+8*(5+4)] ; premiere portion a creer
-            mov r11, [rsp+8*(5+1)] ; premiere portion de destination
-            mov rcx, [rsp+8*(5+3)] ; nombre de colonnes a creer
-        ; ----- boucle
-            pssGD_compteur:
-                ; +0
-                sub rsp, 8 ; pre-alignement de la pile
-                ; +1
-                push r10 ; numero de portion a creer
-                ; +2
-                mov rax, [rsp+8*(5+2+2)]
-                push rax ; nombre de lignes a creer
-                ; +3
-                push r11 ; portion destination
-                ; +4
-                ; Num/Nbr/Dest
-                call sgt_vrt_simples_std_GD
-                add rsp, 4*8
-                ;
-                add r10, 1
-                cmp r11, 0
-                je pssGD_noDest
-                    add r11, 1
-                pssGD_noDest:
-                dec rcx
-                cmp rcx, 0
-            jne pssGD_compteur
-            add rsp, 8
-            pop rax
-            pop rcx
-            pop r11
-            pop r10
-        ret
-    pqt_identification: ; creation d'un paquet d'identification de code (Num/NbrH/NbrV/Dest)
-            ; Arguments : NumeroDePortionMere / nombre de mere horizontales / Nombre de liaisons verticales / PortionDeDestination(!decalage)
-        ; ----- sauvegarde des registres utilises (alignement pile inclus)
-            push r11
-            push r12
-            push r13
-            push r14
-            push r15
-            push rcx
-            push rdx
-            push rax
-            sub rsp, 8
-        ; ----- variables
-            mov r11, [rsp+8*(9+4)] ; premiere mere
-            mov r14, [rsp+8*(9+1)] ; premiere destination
-        ; ----- boucle ==================================================
-            mov rcx, [rsp+8*(9+3)] ; nombre de colonnes
-            pid_meres:
-                ; variables
-                mov r12, r11 ; mere/liaison courante
-                mov r13, r12
-                add r13, LARGEUR_DE_COUCHE ; liaison suivante
-                ; creation mere               (Num/Charge/Seuil/DRefract/LSuiv)
-                make_a_call sub_creer_portion_mere, r12, CHARGE_INITIALE, CHARGE_INITIALE+1, 0, r13
-                ; evolution variables
-                add r12, LARGEUR_DE_COUCHE
-                add r13, LARGEUR_DE_COUCHE
-                mov r15, r14
-                ; boucle ------------------------------------------------------
-                mov rdx, [rsp+8*(9+2)] ; nombre de lignes
-                pid_liaisons:
-                    ; creation liaison              (Num/ValBloc/MasseBloc/Dest/LSuiv)
-                    make_a_call sub_creer_portion_liaison, r12, 70, 0, r15, r13
-                    add r12, LARGEUR_DE_COUCHE
-                    add r13, LARGEUR_DE_COUCHE
-                    add r15, LARGEUR_DE_COUCHE
-                    ; bouclage
-                    dec rdx
-                    cmp rdx, 0
-                jne pid_liaisons ; --------------------------------------------
-                sub r12, LARGEUR_DE_COUCHE
-                mov r13, 0
-                sub r15, LARGEUR_DE_COUCHE
-                ; ecraser derniere liaison       (Num/ValBloc/MasseBloc/Dest/LSuiv)
-                make_a_call sub_creer_portion_liaison, r12, 10, 255, r15, 0
-                add r11, 1 ; mere suivante
-                ; bouclage
-                dec rcx
-                cmp rcx, 0
-            jne pid_meres ; ==================================================
-        ; recuperation des registres
-            add rsp, 8
-            pop rax
-            pop rdx
-            pop rcx
-            pop r15
-            pop r14
-            pop r13
-            pop r12
-            pop r11
-        ; sortie
-        ret    
-    pqt_voyant_lumineux: ; creation d'un paquet de lecture vertical standard (Num) A FINALISER
-            ; Arguments : NumeroDePortion
-        ; ----- sauvegarde des registres utilises (alignement pile inclus)
-            push r10
-            push r11
-            push rcx
-            push rax
-            sub rsp, 8
-        ; ----- variables principales
-            mov r10, [rsp+8*(99+1)] ; portion de base, puis incrementation par ligne
-            mov rdx, r10 ; destination finale (fixe)
-            add rdx, 1
-        ; ----- variables
-            mov r11, r10 ; portion de base de la ligne, puis incrementation par 2
-            mov r13, r11
-            add r13, 2 ; liaison suivante, puis incrementation par 2
-        ; ----- mere
-            make_a_call sub_creer_portion_mere, r11, 1, 2, 0, r13 ; Num/Charge/Seuil/DRefract/LSuiv
-        ; ----- boucle de liaisons
-            mov r14, 10 ; remplacer par TAILLE_DE_VOYANT
-            pvl_compteur_y:
-                mov r15, 10 ; remplacer par TAILLE_DE_VOYANT
-                pvl_compteur_x:
-                    ; ici r11 est valide et pret a etre utilise
-                    mov r12, r11
-                    add r12, 1 ; portion de destination pae ligne, puis incrementation par 2
-                    mov r13, r11
-                    add r13, 2 ; liaison suivante, puis incrementation par 2
-                    make_a_call sub_creer_portion_liaison, r11, 1, 0, r12, r13 ; Num/ValBloc/MasseBloc/Dest/LSuiv
-                    ; bouclage
-                    dec r15
-                    cmp r15, 0
-                jne pvl_compteur_x
-                add r10, LARGEUR_DE_COUCHE
-                mov r12, 0
-                make_a_call sub_creer_portion_liaison, r11, 1, 0, r12, r13 ; Num/ValBloc/MasseBloc/Dest/LSuiv
-                mov r11, r10
-                ; bouclage
-                dec r14
-                cmp r14, 0
-            jne pvl_compteur_y
-            make_a_call sub_creer_portion_liaison, r11, 1, 0, r12, r13 ; Num/ValBloc/MasseBloc/Dest/LSuiv
-                ; +0
-                sub rsp, 8 ; pre-alignement de la pile
-                ; +1
-                push r10 ; numero de portion a creer
-                ; +2
-                mov rax, [rsp+8*(5+2+2)]
-                push rax ; colonne
-                ; +3
-                push r11 ; portion destination
-                ; +4
-                ; Num/Nbr/Dest
-                call sgt_vrt_simples_std_GD
-                add rsp, 4*8
-                ;
-                add r10, 2
-                add r11, 2
-                dec rcx
-                cmp rcx, 0
-            jne pssGD_compteur
-            add rsp, 8
-            pop rax
-            pop rcx
-            pop r11
-            pop r10
-        ret
     ; Creation de reseaux
-    res_base_de_simples: ; creation d'un reseau de simples vierges (Num/Pas/NbrH/NbrV)
-            ; Arguments : NumeroDePortion / Pas / NombreALHorizontale / NombreALaVerticale
+    sub_creer_reseau: ; creation d'un reseau (......../Type/NumP/NbrHX/NbrVY/NbrPZ/Pas)
+            ; Arguments selon besoin : / / / /
+            ; Arguments pour segment : 7=NumeroDeSuivant
+            ; Arguments pour neurone : 7=NumeroDeSuivant
+            ; Arguments pour extension : 8=NuméroDeDestination / 7=NumeroDeSuivant
+            ; Arguments pour boucles : / 6=TypeDePortion / 5=NumeroDePortion / 4=NombreHsurX / 3=NombreVsurY / 2=NombrePsurZ / 1=Pas
         ; ----- sauvegarde des registres utilises (alignement pile inclus)
             sub rsp, 8
             push r8
@@ -2532,148 +1901,87 @@ section .text ; ----------------------------------------------------------------
             push r11
             push r12
             push r13
-            push rdx
             push rax
-        ; ----- variables
-            ; premiere portion a creer
-            mov r10, [rsp+8*(9+4)]
-            ; variable de recuperation du numero de portion
-            mov r9, r10
-            ; pas du reseau
-            mov r8, [rsp+8*(9+3)]
-            ; nombre de neurones axe horizontal
-            xor rdx, rdx
-            mov rax, [rsp+8*(9+2)]
-            div r8
-            mov r12, rax
-            ; variable de recuperation du nombre de neurones horizontal
-            mov r11, r12
-            ; nombre de neurones axe vertical
-            xor rdx, rdx
-            mov rax, [rsp+8*(9+1)]
-            div r8
-            mov r13, rax
-        ; ----- boucle
-            rbds_compteur_y:
-                mov r12, r11 ; nombre de neurones axe horizontal
-                rbds_compteur_x:
-                    ; +0
-                    sub rsp, 8 ; pre-alignement de la pile
-                    ; +1
-                    push r10 ; numero de portion a creer
-                    ; +2
-                    push CHARGE_INITIALE ; charge actuelle
-                    ; +3
-                    push SEUIL_STANDARD ; seuil de declenchement
-                    ; +4
-                    push VALEUR_BOUTONS_STANDARD ; ? code liaisons ?
-                    ; +5
-                    push MASSE_BOUTONS_STANDARD ; ? code liaisons ?
-                    ; +6
-                    push DUREE_REFRACTAIRE ; Duree refractaire
-                    ; +7
-                    push 0 ; Liaison 0 = vierge
-                    ; +8
-                    ; */Num/Charge/Seuil/ValBloc/MasseBloc/DRefract/Dest
-                    call sub_creer_portion_simple
-                    add rsp, 8*8
-                    ; -----
-                    add r10, r8
-                    ; -----
-                    dec r12
-                    cmp r12, 0
-                jne rbds_compteur_x
-                ; -----
-                mov rax, LARGEUR_DE_COUCHE
-                mov rdx, r8
-                mul rdx
-                add r9, rax
-                mov r10, r9
-                ; -----
-                dec r13
-                cmp r13, 0
-            jne rbds_compteur_y
-        ; ----- recuperation des registres originaux
-            pop rax
-            pop rdx
-            pop r13
-            pop r12
-            pop r11
-            pop r10
-            pop r9
-            pop r8
-            add rsp, 8
-        ret
-    res_base_de_meres: ; creation d'un reseau de meres vierges (Num/Pas/NbrH/NbrV)
-            ; Arguments : NumeroDePortion / Pas / NombreALHorizontale / NombreALaVerticale
-        ; ----- sauvegarde des registres utilises (alignement pile inclus)
-            sub rsp, 8
-            push r8
-            push r9
-            push r10
-            push r11
-            push r12
-            push r13
+            push rbx
+            push rcx
             push rdx
-            push rax
         ; ----- variables
-            ; premiere portion a creer
-            mov r10, [rsp+8*(9+4)]
-            ; variable de recuperation du numero de portion
-            mov r9, r10
-            ; pas du reseau
-            mov r8, [rsp+8*(9+3)]
-            ; nombre de neurones axe horizontal
-            xor rdx, rdx
-            mov rax, [rsp+8*(9+2)]
-            div r8
-            mov r12, rax
-            ; variable de recuperation du nombre de neurones horizontal
-            mov r11, r12
-            ; nombre de neurones axe vertical
-            xor rdx, rdx
-            mov rax, [rsp+8*(9+1)]
-            div r8
-            mov r13, rax
+            mov rbx, [rsp+8*(11+5)] ; premiere portion a creer            
+            mov rcx, [rsp+8*(11+7)] ; numDest à incrementer
+            mov rdx, [rsp+8*(11+8)] ; numSuiv à incrémenter
+            mov r8, [rsp+8*(11+1)] ; pas sur x
+            mov r9, r8
+            shl r9, DECALAGE_Y ; pas sur y
+            mov r10, r8
+            shl r10, DECALAGE_Z ; pas sur z
         ; ----- boucle
-            rbdm_compteur_y:
-                mov r12, r11 ; nombre de neurones axe horizontal
-                rbdm_compteur_x:
-                    ; +0
-                    sub rsp, 8 ; pre-alignement de la pile
-                    ; +1
-                    push r10 ; numero de portion a creer
-                    ; +2
-                    push CHARGE_INITIALE ; charge actuelle
-                    ; +3
-                    push SEUIL_STANDARD ; seuil de declenchement
-                    ; +4
-                    push DUREE_REFRACTAIRE ; Duree refractaire
-                    ; +5
-                    push 0 ; Liaison 0 = vierge
-                    ; +6
-                    ; */Num/Charge/Seuil/DRefract/LSuiv
-                    call sub_creer_portion_mere
-                    add rsp, 6*8
-                    ; -----
-                    add r10, r8
-                    ; -----
-                    dec r12
-                    cmp r12, 0
-                jne rbdm_compteur_x
-                ; -----
-                mov rax, LARGEUR_DE_COUCHE
-                mov rdx, r8
-                mul rdx
-                add r9, rax
-                mov r10, r9
-                ; -----
-                dec r13
-                cmp r13, 0
-            jne rbdm_compteur_y
+            mov r13, [rsp+8*(11+2)] ; initialisation z
+            rdnc_boucle_z:
+                push rdx ; sauvegarde numSuiv avant travail sur y
+                push rcx ; sauvegarde numDest avant travail sur y
+                push rbx ; sauvegarde portion avant travail sur y
+                mov r12, [rsp+8*(11+3+3)] ; initialisation y
+                rdnc_boucle_y:
+                    push rdx ; sauvegarde numSuiv avant travail sur x
+                    push rcx ; sauvegarde numDest avant travail sur x
+                    push rbx ; sauvegarde portion avant travail sur x
+                    mov r11, [rsp+8*(11+6+4)] ; initialisation x
+                    rdnc_boucle_x:
+                        mov rax, [rsp+8*(11+6+6)]
+                        comparer_et_jump_si_egal al, TYPE_SEGMENT_COMPLET,      scr_sc
+                        comparer_et_jump_si_egal al, TYPE_NEURONE_COMPLET,      scr_nc
+                        comparer_et_jump_si_egal al, TYPE_EXTENSION_COMPLET,    scr_ec
+                        ; ... autres
+                        jmp scr_suite
+                        ; traitement différencié
+                            ; rbx = 5 = neurone
+                            ;     = 6 = type
+                            ; rcx = 7 = adresse suivant (ou destination)
+                            ; rdx = 8 = adresse destination
+                            ; suivants ...
+                            scr_sc:
+                                call_datapush_style sub_creer_segment_dendritique_7, \
+                                TYPE_SEGMENT_COMPLET, rbx,    1,       0,      0,          0,             rcx
+                                ; Type,               NumPor, NivTemp, DecEvo, SynapDispo, PotSegRestant, SegSuivant
+                                jmp scr_suite
+                            scr_nc:
+                                call_datapush_style sub_creer_portion_neurone_10, \
+                                TYPE_NEURONE_COMPLET, rbx,    VS_PSEUIL,  VS_BREFRC,   0,       0,        0,       0,       0,      rcx
+                                ; Type,               NumPor, PuissSeuil, BaseRefract, PotDRay, PotDPlan, PotDApi, PotDPan, PotAxo, ExtAxo
+                                jmp scr_suite
+                            scr_ec:
+                                call_datapush_style sub_creer_extension_axonale_8, \
+                                TYPE_EXTENSION_COMPLET, rbx,    VS_MASBB,   VS_VALBB,    1,           rdx,  0,          rcx
+                                ; Type,                 NumPor, MasseBlocB, ValeurBlocB, NivTemporel, Dest, PotAxoRest, SegmentSuivant
+                                jmp scr_suite
+                        ; fin traitement différencié
+                        scr_suite:
+                        add rbx, r8 ; portion suivante sur x
+                        add rcx, r8 ; numDest suivant sur x
+                        add rdx, r8 ; numSuiv suivant sur x
+                        sub r11, 1
+                    jnz rdnc_boucle_x
+                    pop rbx ; récupération portion après travail sur x
+                    pop rcx ; récupération numDest après travail sur x
+                    pop rdx ; récupération numSuiv après travail sur x
+                    add rbx, r9 ; portion suivante sur y
+                    add rcx, r9 ; numDest suivant sur y
+                    add rdx, r9 ; numSuiv suivant sur y
+                    sub r12, 1
+                jnz rdnc_boucle_y
+                pop rbx ; récupération portion après travail sur y
+                pop rcx ; récupération numDest après travail sur y
+                pop rdx ; récupération numSuiv après travail sur y
+                add rbx, r10 ; portion suivante sur z
+                add rcx, r10 ; numDest suivant sur z
+                add rdx, r10 ; numSuiv suivant sur z
+                sub r13, 1
+            jnz rdnc_boucle_z
         ; ----- recuperation des registres originaux
-            pop rax
             pop rdx
+            pop rcx
+            pop rbx
+            pop rax
             pop r13
             pop r12
             pop r11
@@ -2707,102 +2015,145 @@ section .text ; ----------------------------------------------------------------
         cas_WM_KEYDOWN:
             ; test de touche
                 mov rax, qword [rbp+32]
-                comparer_et_jump_si_egal al, 0x41, cas_WM_KEYDOWN_A
-                comparer_et_jump_si_egal al, 0x5A, cas_WM_KEYDOWN_Z
-                comparer_et_jump_si_egal al, 0x45, cas_WM_KEYDOWN_E
-                comparer_et_jump_si_egal al, 0x52, cas_WM_KEYDOWN_R
+                comparer_et_jump_si_egal al, 0x41, cas_WM_KEYDOWN_A ; dessin types
+                comparer_et_jump_si_egal al, 0x5A, cas_WM_KEYDOWN_Z ; dessin seuils
+                comparer_et_jump_si_egal al, 0x45, cas_WM_KEYDOWN_E ; dessin charges (default)
+                comparer_et_jump_si_egal al, 0x52, cas_WM_KEYDOWN_R ; dessin retro-actions
                 ;
-                comparer_et_jump_si_egal al, 0x54, cas_WM_KEYDOWN_T
-                comparer_et_jump_si_egal al, 0x59, cas_WM_KEYDOWN_Y
+                comparer_et_jump_si_egal al, 0x58, cas_WM_KEYDOWN_X ; x-
+                comparer_et_jump_si_egal al, 0x56, cas_WM_KEYDOWN_V ; x+
+                comparer_et_jump_si_egal al, 0x43, cas_WM_KEYDOWN_C ; y-
+                comparer_et_jump_si_egal al, 0x44, cas_WM_KEYDOWN_D ; y+
+                comparer_et_jump_si_egal al, 0x57, cas_WM_KEYDOWN_W ; z-
+                comparer_et_jump_si_egal al, 0x51, cas_WM_KEYDOWN_Q ; z+
                 ;
-                comparer_et_jump_si_egal al, 0x55, cas_WM_KEYDOWN_U
+                comparer_et_jump_si_egal al, 0x42, cas_WM_KEYDOWN_B ; mode pas à pas (toggle)
+                comparer_et_jump_si_egal al, 0x4E, cas_WM_KEYDOWN_N ; avancer d'un pas
                 ;
-                comparer_et_jump_si_egal al, 0x50, cas_WM_KEYDOWN_P
+                comparer_et_jump_si_egal al, 0x55, cas_WM_KEYDOWN_U ; détail portion (toggle)
+                ;
+                comparer_et_jump_si_egal al, 0x50, cas_WM_KEYDOWN_P ; sortie
                 comparer_et_jump_si_egal al, 0x1B, cas_WM_KEYDOWN_Escape ; ne fonctionne pas ???
                 jmp cas_WM_KEYDOWN_Sortie
-            ; touche a
-                cas_WM_KEYDOWN_A:
-                    ; texte de fenetre
-                    mov rcx, [rbp+16]               ; HWND
-                    lea rdx, [NOM_FENETRE_A0]       ; LPCSTR
-                    sub rsp, SHADOW_SPACE_SIZE
-                    call SetWindowTextA
-                    add rsp, SHADOW_SPACE_SIZE
-                    ; changement du mode de tracage
-                    mov byte [modeTracage], 0
-                    jmp cas_WM_KEYDOWN_Sortie
-            ; touche z
-                cas_WM_KEYDOWN_Z:
-                    ; texte de fenetre
-                    mov rcx, [rbp+16]               ; HWND
-                    lea rdx, [NOM_FENETRE_Z1]       ; LPCSTR
-                    sub rsp, SHADOW_SPACE_SIZE
-                    call SetWindowTextA
-                    add rsp, SHADOW_SPACE_SIZE
-                    ; changement du mode de tracage                    mov byte [modeTracage], 1
-                    mov byte [modeTracage], 1
-                    jmp cas_WM_KEYDOWN_Sortie
-            ; touche e
-                cas_WM_KEYDOWN_E:
-                    ; texte de fenetre
-                    mov rcx, [rbp+16]               ; HWND
-                    lea rdx, [NOM_FENETRE_E2]       ; LPCSTR
-                    sub rsp, SHADOW_SPACE_SIZE
-                    call SetWindowTextA
-                    add rsp, SHADOW_SPACE_SIZE
-                    ; changement du mode de tracage                    mov byte [modeTracage], 2
-                    mov byte [modeTracage], 2
-                    jmp cas_WM_KEYDOWN_Sortie
-            ; touche r
-                cas_WM_KEYDOWN_R:
-                    ; texte de fenetre
-                    mov rcx, [rbp+16]               ; HWND
-                    lea rdx, [NOM_FENETRE_R3]       ; LPCSTR
-                    sub rsp, SHADOW_SPACE_SIZE
-                    call SetWindowTextA
-                    add rsp, SHADOW_SPACE_SIZE
-                    ; changement du mode de tracage                    mov byte [modeTracage], 3
-                    mov byte [modeTracage], 3
-                    jmp cas_WM_KEYDOWN_Sortie
-            ; touche t
-                cas_WM_KEYDOWN_T:
-                    mov al, [lenteur]
-                    cmp al, 0
-                    je cas_WM_KEYDOWN_Sortie
-                    dec al
-                    mov [lenteur], al
-                    jmp cas_WM_KEYDOWN_Sortie
-            ; touche y
-                cas_WM_KEYDOWN_Y:
-                    mov al, [lenteur]
-                    cmp al, 64 ; maxi = 64
-                    je cas_WM_KEYDOWN_Sortie
-                    inc al
-                    mov [lenteur], al
-                    jmp cas_WM_KEYDOWN_Sortie
-            ; touche u
-                cas_WM_KEYDOWN_U:
-                    mov al, [detailConsole]
-                    cmp al, 0
-                    je mettre_detail_a_1
-                    mov byte [detailConsole], 0
-                    jmp fin_modifier_detail
-                    ; mettre a 0
-                    mettre_detail_a_1:
-                    mov byte [detailConsole], 1
-                    fin_modifier_detail:
-                    jmp cas_WM_KEYDOWN_Sortie
-            ; touche p
-                cas_WM_KEYDOWN_P:
-            ; touche escape
-                cas_WM_KEYDOWN_Escape:
+            cas_WM_KEYDOWN_A: ; touche a
+                ; texte de fenetre
+                mov rcx, [rbp+16]               ; HWND
+                lea rdx, [NOM_FENETRE_A0]       ; LPCSTR
+                sub rsp, SHADOW_SPACE_SIZE
+                call SetWindowTextA
+                add rsp, SHADOW_SPACE_SIZE
+                ; changement du mode de tracage
+                mov byte [modeTracage], 0
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_Z: ; touche z
+                ; texte de fenetre
+                mov rcx, [rbp+16]               ; HWND
+                lea rdx, [NOM_FENETRE_Z1]       ; LPCSTR
+                sub rsp, SHADOW_SPACE_SIZE
+                call SetWindowTextA
+                add rsp, SHADOW_SPACE_SIZE
+                ; changement du mode de tracage
+                mov byte [modeTracage], 1
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_E: ; touche e
+                ; texte de fenetre
+                mov rcx, [rbp+16]               ; HWND
+                lea rdx, [NOM_FENETRE_E2]       ; LPCSTR
+                sub rsp, SHADOW_SPACE_SIZE
+                call SetWindowTextA
+                add rsp, SHADOW_SPACE_SIZE
+                ; changement du mode de tracage
+                mov byte [modeTracage], 2
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_R: ; touche r
+                ; texte de fenetre
+                mov rcx, [rbp+16]               ; HWND
+                lea rdx, [NOM_FENETRE_R3]       ; LPCSTR
+                sub rsp, SHADOW_SPACE_SIZE
+                call SetWindowTextA
+                add rsp, SHADOW_SPACE_SIZE
+                ; changement du mode de tracage                    mov byte [modeTracage], 3
+                mov byte [modeTracage], 3
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_X: ; touche x
+                mov rax, [visualize_x]
+                cmp rax, 0
+                jbe cas_WM_KEYDOWN_Sortie
+                dec rax
+                mov [visualize_x], rax
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_V: ; touche v
+                mov rax, [visualize_x]
+                cmp rax, DIMENSION_X-1
+                jae cas_WM_KEYDOWN_Sortie
+                inc rax
+                mov [visualize_x], rax
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_C: ; touche c
+                mov rax, [visualize_y]
+                cmp rax, DIMENSION_Y-1
+                jae cas_WM_KEYDOWN_Sortie
+                inc rax
+                mov [visualize_y], rax
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_D: ; touche d
+                mov rax, [visualize_y]
+                cmp rax, 0
+                jbe cas_WM_KEYDOWN_Sortie
+                dec rax
+                mov [visualize_y], rax
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_W: ; touche w
+                mov rax, [visualize_z]
+                cmp rax, 0
+                jbe cas_WM_KEYDOWN_Sortie
+                dec rax
+                mov [visualize_z], rax
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_Q: ; touche q
+                mov rax, [visualize_z]
+                cmp rax, DIMENSION_Z-1
+                jae cas_WM_KEYDOWN_Sortie
+                inc rax
+                mov [visualize_z], rax
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_B: ; touche b
+                mov al, [mode_pas_a_pas]
+                cmp al, 0
+                je mettre_pasapas_a_1
+                mov [mode_pas_a_pas], byte 0
+                jmp fin_modifier_pasapas
+                ; mettre a 0
+                mettre_pasapas_a_1:
+                mov [mode_pas_a_pas], byte 1
+                fin_modifier_pasapas:
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_N: ; touche n
+                mov al, [mode_pas_a_pas]
+                cmp al, 1
+                jne cas_WM_KEYDOWN_X_suite
+                mov [mode_pas_a_pas], byte 2
+                cas_WM_KEYDOWN_X_suite:
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_U: ; touche u
+                mov al, [detailConsole]
+                cmp al, 0
+                je mettre_detail_a_1
+                mov byte [detailConsole], 0
+                jmp fin_modifier_detail
+                ; mettre a 0
+                mettre_detail_a_1:
+                mov byte [detailConsole], 1
+                fin_modifier_detail:
+                jmp cas_WM_KEYDOWN_Sortie
+            cas_WM_KEYDOWN_P: ; touche p
+                cas_WM_KEYDOWN_Escape: ; touche escape / ne fonctionne pas
                 xor rcx, rcx
                 sub rsp, SHADOW_SPACE_SIZE
                 call PostQuitMessage
                 add rsp, SHADOW_SPACE_SIZE
                 jmp cas_WM_KEYDOWN_Sortie
-            ; rax et sortie
-                cas_WM_KEYDOWN_Sortie:
+            cas_WM_KEYDOWN_Sortie: ; rax et sortie
                 xor rax, rax
                 jmp fin_WindowProc
         ; -----------------------------------------------------------------------------------------
@@ -2840,10 +2191,10 @@ section .text ; ----------------------------------------------------------------
             ; verification DIBSection bien creee (handle et adresse != 0)
                 mov rax, [pBitDataHandle]
                 test rax, rax
-                jz no_dibs
+                jz cWP_no_dibs
                 mov rax, [pBitDataAdress]
                 test rax, rax
-                jz no_dibs
+                jz cWP_no_dibs
             ; adaptation de hdc2 a la section DIB
                 mov rcx, qword [DrawingCtxHandle2]
                 mov rdx, qword [pBitDataHandle]
@@ -2855,129 +2206,157 @@ section .text ; ----------------------------------------------------------------
                 sub rsp, SHADOW_SPACE_SIZE
                 call GdiFlush
                 add rsp, SHADOW_SPACE_SIZE
-            ; tracage sur DIBSection ------------- FAIRE D'ABORD LE CHOIX DE L'AFFICHAGE ET LES BOUCLES APRES
-                mov r11, [pBitDataAdress] ; compteur de point
-                mov r9, HAUTEUR_FENETRE ; compteur de ligne
-                lea r10, [portions] ; adresse de portion
-                boucle_lignes:
-                    mov r8, LARGEUR_FENETRE ; compteur de colonne
-                    boucle_colonnes:
+            ; tracage sur DIBSection
+                ; pointeur d'adresse de portion (init sur z)
+                mov rax, [visualize_z]
+                shl rax, DECALAGE_Z
+                adresse_from_numero r10, rax
+                ; pointeur d'adresse de point à tracer
+                mov r11, [pBitDataAdress]
+                mov r15, r11
+                ; traçage du contenu
+                mov r9, 0 ; compteur de ligne
+                cWP_boucle_lignes:
+                    mov r8, 0 ; compteur de colonne
+                    cWP_boucle_colonnes:
                         xor rdx, rdx
                         mov cl, byte [modeTracage]
-                        cmp cl, 0
-                            je boucle_tracage_A0
-                        cmp cl, 1
-                            je boucle_tracage_Z1
-                        cmp cl, 2
-                            je boucle_tracage_E2
-                        cmp cl, 3
-                            je boucle_tracage_R3
-                        jmp boucle_tracage_fin
-                        ; mode A0 ------------------------------
-                            boucle_tracage_A0:
+                        comparer_et_jump_si_egal cl, 0, cWP_tracage_mode_A0
+                        comparer_et_jump_si_egal cl, 1, cWP_tracage_mode_Z1
+                        comparer_et_jump_si_egal cl, 2, cWP_tracage_mode_E2
+                        comparer_et_jump_si_egal cl, 3, cWP_tracage_mode_R3
+                        jmp cWP_boucle_tracage_fin
+                        cWP_tracage_mode_A0: ; mode A0 / type de portion ------------------------------
                             ; type
-                                mov dl, [r10+0]
-                            ; verts = entrees
-                                cmp dl, TYPE_PULSEUR
-                                    je bta0_vert
-                                cmp dl, TYPE_LECTEUR
-                                    je bta0_vert
-                            ; bleu = recepteur
-                                cmp dl, TYPE_MERE
-                                    je bta0_bleu
-                                cmp dl, TYPE_MERE_RETROACTIVE
-                                    je bta0_bleu
-                            ; violet = emetteur/recepteur
-                                cmp dl, TYPE_SIMPLE_NONACTIVEE
-                                    je bta0_violet
-                                cmp dl, TYPE_SIMPLE_NONACTIVEE_RETROACTIVE
-                                    je bta0_violet
-                                cmp dl, TYPE_SIMPLE_ACTIVEE
-                                    je bta0_violet
-                                cmp dl, TYPE_SIMPLE_ACTIVEE_RETROACTIVE
-                                    je bta0_violet
-                                cmp dl, TYPE_SIMPLE_POSTACTIVEE
-                                    je bta0_violet
-                                cmp dl, TYPE_SIMPLE_POSTACTIVEE_RETROACTIVE
-                                    je bta0_violet
-                            ; rouge = emetteur 
-                                cmp dl, TYPE_LIAISON_NONACTIVEE
-                                    je bta0_rouge
-                                cmp dl, TYPE_LIAISON_ACTIVEE
-                                    je bta0_rouge
-                                cmp dl, TYPE_LIAISON_POSTACTIVEE
-                                    je bta0_rouge
-                            ; fin couleurs
-                            jmp boucle_tracage_fin
+                            mov dl, [r10+OS_TYPEVSA_1]
+                            and dl, MASQUE_TYPE_Txxx
+                            comparer_et_jump_si_egal dl, TYPE_SEGMENT_GERME, cWP_bta0_vert
+                            comparer_et_jump_si_egal dl, TYPE_NEURONE_GERME, cWP_bta0_bleu
+                            comparer_et_jump_si_egal dl, TYPE_EXTENSION_GERME, cWP_bta0_rouge
+                            jmp cWP_boucle_tracage_fin
                             ; ---------------- couleurs
-                            bta0_vert:
-                                mov [r11+1], byte 255
-                                jmp boucle_tracage_fin
-                            bta0_bleu:
-                                mov [r11+2], byte 63
-                                mov [r11+1], byte 63
-                                mov [r11+0], byte 255
-                                jmp boucle_tracage_fin
-                            bta0_violet:
-                                mov [r11+2], byte 255
-                                mov [r11+0], byte 255
-                                jmp boucle_tracage_fin
-                            bta0_rouge:
-                                mov [r11+2], byte 255
-                                jmp boucle_tracage_fin
-                            jmp boucle_tracage_fin
-                        ; mode Z1 ------------------------------
-                            boucle_tracage_Z1:
-                                ; affichage valeur bloc de boutons => vert
-                                    mov dl, byte [r10+OS_VALBB_1]
-                                    mov [r11+1], dl
-                                jmp boucle_tracage_fin
-                        ; mode E2 ------------------------------
-                            boucle_tracage_E2:
-                                ; affichage charge/chrono => vert ou rouge
-                                    mov dx, word [r10+OS_CHARG_2]
-                                    cmp dx, 256
-                                    ja bte2_vert
-                                    jmp bte2_rouge
-                                jmp boucle_tracage_fin
-                                bte2_vert:
-                                    mov [r11+1], dl
-                                    jmp boucle_tracage_fin
-                                bte2_rouge:
-                                    shr rdx, 8
-                                    mov [r11+2], dl
-                                    jmp boucle_tracage_fin
-                                jmp boucle_tracage_fin
-                        ; mode R3 ------------------------------
-                            boucle_tracage_R3:
-                                ; affichage cible retroactive (forcement simple ou liaison) => bleu
-                                    tester_retroactivite_adresse_FA r10, (rax)
-                                    jne btr3_suite
-                                        mov dl, 127
-                                        mov [r11+0], dl ; bleu
-                                ; tracer aussi en rouge l'activite
-                                    btr3_suite:
-                                    tester_activite_adresse r10, (rax)
-                                    jne boucle_tracage_fin
-                                        mov dl, 127
-                                        mov [r11+2], dl ; bleu
-                                ; sortie
-                                    jmp boucle_tracage_fin
+                            cWP_bta0_vert:
+                                mov [r11+VERT], byte 255
+                                jmp cWP_boucle_tracage_fin
+                            cWP_bta0_bleu:
+                                mov [r11+ROUG], byte 63
+                                mov [r11+VERT], byte 63
+                                mov [r11+BLEU], byte 255
+                                jmp cWP_boucle_tracage_fin
+                            cWP_bta0_violet:
+                                mov [r11+ROUG], byte 255
+                                mov [r11+BLEU], byte 255
+                                jmp cWP_boucle_tracage_fin
+                            cWP_bta0_rouge:
+                                mov [r11+ROUG], byte 255
+                                jmp cWP_boucle_tracage_fin
+                        cWP_tracage_mode_Z1: ; mode Z1 / bloc de boutons synaptiques ------------------------------
+                            ; affichage valeur bloc de boutons => vert
+                            mov dl, byte [r10+OS_BSYNV_1]
+                            mov [r11+VERT], dl
+                            jmp cWP_boucle_tracage_fin
+                        cWP_tracage_mode_E2: ; mode E2 / charge actuelle ------------------------------
+                            ; type
+                            mov dl, [r10+OS_TYPEVSA_1]
+                            and dl, MASQUE_TYPE_Txxx
+                            comparer_et_jump_si_egal dl, 0b100_00_00_0, cWP_bte2_traiter
+                            comparer_et_jump_si_egal dl, TYPE_SEGMENT_GERME, cWP_bte2_traiter
+                            comparer_et_jump_si_egal dl, TYPE_NEURONE_GERME, cWP_bte2_traiter
+                            jmp cWP_boucle_tracage_fin
+                            ; ---------------- affichage charge/chrono => vert ou rouge
+                            cWP_bte2_traiter:
+                                mov dx, word [r10+OS_CHARG0_2]
+                                cmp dx, 256
+                                jae cWP_bte2_grand
+                                jmp cWP_bte2_petit
+                                cWP_bte2_grand:
+                                    mov [r11+VERT], dl
+                                    jmp cWP_boucle_tracage_fin
+                                cWP_bte2_petit:
+                                    shr dx, 8
+                                    mov [r11+ROUG], dl
+                                    jmp cWP_boucle_tracage_fin
+                        cWP_tracage_mode_R3: ; mode R3 / activité + retroactivité ------------------------------
+                            ; type
+                            mov dl, [r10+OS_TYPEVSA_1]
+                            and dl, MASQUE_TYPE_Txxx
+                            comparer_et_jump_si_egal dl, TYPE_SEGMENT_GERME, cWP_btr3_traiter
+                            comparer_et_jump_si_egal dl, TYPE_NEURONE_GERME, cWP_btr3_traiter
+                            comparer_et_jump_si_egal dl, TYPE_EXTENSION_GERME, cWP_btr3_traiter
+                            jmp cWP_boucle_tracage_fin
+                            ; affichage cible retroactive (forcement simple ou liaison) => bleu
+                            cWP_btr3_traiter:
+                            mov dl, [r10+OS_TYPEVSA_1]
+                            and dl, MASQUE_TYPE_xxxA
+                            comparer_et_jump_si_egal dl, MASQUE_TYPE_xxxA, cWP_btr3_traiter
+                            jmp cWP_boucle_tracage_fin
+                            cWP_btr3_suite:
+                            mov [r11+BLEU], byte 255
+                            ; jmp cWP_boucle_tracage_fin
                         ; fin des options ----------------------
-                        boucle_tracage_fin:
-                        ; portion suivante ---------------------
-                            add r10, TAILLE_DES_PORTIONS
-                        ; point suivant ------------------------
-                            add r11, 3
-                        ; colonne suivante
-                            dec r8
-                            cmp r8, 0
-                    jne boucle_colonnes
+                        cWP_boucle_tracage_fin:
+                        ; recuperation adresse pour viseur
+                        cmp r8, [visualize_x]
+                        jne cWP_boucle_tracage_fin2
+                        cmp r9, [visualize_y]
+                        jne cWP_boucle_tracage_fin2
+                        mov r15, r11
+                        cWP_boucle_tracage_fin2:
+                        ; bouclages
+                        add r10, TAILLE_DES_PORTIONS ; portion suivante
+                        add r11, NOMBRE_OCTET_PAR_POINT ; adresse point suivant
+                        inc r8 ; colonne suivante
+                        cmp r8, LARGEUR_FENETRE
+                    jne cWP_boucle_colonnes
                     ; fin de boucle de colonnes
-                        add r11, COMPLEMENT_LIGNE_DWORD
-                        dec r9
-                        cmp r9, 0
-                jne boucle_lignes
+                    add r11, COMPLEMENT_LIGNE_DWORD ; adresse point ligne suivante
+                    inc r9 ; ligne suivante
+                    cmp r9, HAUTEUR_FENETRE
+                    cmovne r14, r11 ; pour calcul decalage d'adresse par ligne (pour viseur)
+                jne cWP_boucle_lignes
+                ; tracage point simple
+                mov [r15+ROUG], byte 255
+                mov [r15+VERT], byte 255
+                mov [r15+BLEU], byte 255
+                jmp cWP_suite_apres_tracage
+                    ; décalages
+                    mov r8, NOMBRE_OCTET_PAR_POINT ; décalage d'adresse par colonne
+                    mov r9, r11
+                    sub r9, r14 ; décalage d'adresse par ligne
+                    ; traçage viseur
+                    shl r8, 1
+                    shl r9, 1
+                    ; A_FAIRE : mieux dessiner
+                    ; A_FAIRE : empecher le traçage des points hors de la zone
+                    ; point 1
+                        mov rax, r15
+                        add rax, r8
+                        add rax, r9
+                        mov [rax+ROUG], byte 255
+                        mov [rax+VERT], byte 255
+                        mov [rax+BLEU], byte 255
+                    ; point 2
+                        mov rax, r15
+                        add rax, r8
+                        sub rax, r9
+                        mov [rax+ROUG], byte 255
+                        mov [rax+VERT], byte 255
+                        mov [rax+BLEU], byte 255
+                    ; point 3
+                        mov rax, r15
+                        sub rax, r8
+                        sub rax, r9
+                        mov [rax+ROUG], byte 255
+                        mov [rax+VERT], byte 255
+                        mov [rax+BLEU], byte 255
+                    ; point 4
+                        mov rax, r15
+                        sub rax, r8
+                        add rax, r9
+                        mov [rax+ROUG], byte 255
+                        mov [rax+VERT], byte 255
+                        mov [rax+BLEU], byte 255
+                cWP_suite_apres_tracage:
             ; copie d'un morceau de section DIB vers hDC
                 mov rcx, qword [DrawingCtxHandle]           ; Destination device context
                 mov edx, 0                                  ; Destination X
@@ -3010,8 +2389,7 @@ section .text ; ----------------------------------------------------------------
                 sub rsp, SHADOW_SPACE_SIZE
                 call DeleteDC
                 add rsp, SHADOW_SPACE_SIZE
-            no_dibs:
-            ; cloture du tracage
+            cWP_no_dibs: ; cloture du tracage
                 mov rcx, qword [rbp+16]                 ; hWnd
                 lea rdx, [PaintStruct]                    ; lpPaint
                 sub rsp, SHADOW_SPACE_SIZE
