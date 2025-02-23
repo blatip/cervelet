@@ -41,6 +41,6 @@ Vitesses et durées
 Choix constructifs :
 	Entraxe neurones : 30 um
 	Vitesse de transmission de signal sur dendrites : 1 um/us
-	Durée de transmission de signal entre neurones à proximité : 20 us
+	Durée de transmission de signal entre neurones à proximité : 20 us -> plutôt 1ms en incluant les synapses chmiques
 	Durée réfractaire : 2 ms
 	Un segment apical = 5 entraxes = 100 um

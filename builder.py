@@ -99,48 +99,48 @@ wraps_datas = { # Dictionnaire des données pour les wraps
         'nom': '',
         'couleur': (127,127,0),
         'textes': ("Code", "N/D", "Largeur de segment *", "N/D", "Nombre de segments *", "N/D", "Adresse *", "N/D"),
-        'initial': [  162,     0,                      1,     0,                      0,     0,           0,     0],
+        'initial': [   72,     0,                      1,     0,                      0,     0,           0,     0],
         'tailles': (    1,     3,                      1,     3,                      2,     6,           8,     8)
     },
     'LECTEUR': {
         'type': 'PORTION',
         'nom': '',
         'couleur': (0,127,127),
-        'textes': ("Code", "N/D", "Persistance actuelle", "Persistance de base", "Index de lecture", "Numéro de bit", "Valeur du bloc de boutons", "P. Source", "N/D", "P. Destination", "N/D", "N/D"),
-        'initial': [  160,     0,                      0,                     1,                  0,               0,                         127,        'p1',     0,       '*prt_z+1',     0,     0],
-        'tailles': (    1,     1,                      1,                     1,                  2,               1,                           1,           6,     2,                6,     2,     8)
+        'textes': ("Code", "N/D", "Persistance actuelle", "Persistance de base", "Index de lecture", "Numéro de bit", "Valeur du bloc de boutons", "P. Source", "U. Source", "P. Destination", "U. Destination", "N/D"),
+        'initial': [  136,     0,                      0,                     1,                  0,               0,                         127,        'p1',           0,       '*prt_z+1',                0,     0],
+        'tailles': (    1,     1,                      1,                     1,                  2,               1,                           1,           4,           4,                4,                4,     8)
     },
     'PULSEUR': {
         'type': 'PORTION',
         'nom': '',
         'couleur': (127,127,127),
-        'textes': ("Code", "N/D", "Charge générée", "Puissance du seuil", "Valeur du bloc de boutons", "N/D", "P. Destination", "N/D", "N/D"),
-        'initial': [  128,     0,                0,                   11,                         127,     0,       '*prt_z+1',     0,     0],
-        'tailles': (    1,     7,                2,                    1,                           1,     4,                                6,     2,     8)
+        'textes': ("Code", "N/D", "Charge générée", "Puissance du seuil", "Valeur du bloc de boutons", "N/D", "P. Destination", "U. Destination", "N/D"),
+        'initial': [  144,     0,                0,                   11,                         127,     0,       '*prt_z+1',                0,     0],
+        'tailles': (    1,     7,                2,                    1,                           1,     4,                4,                4,     8)
     },
     'SEGMENT': {
         'type': 'PORTION',
         'nom': '',
         'couleur': (0,127,0),
-        'textes': ("Code", "Tempo évolution", "Potentiel synaptique disponible", "Niveau TAC", "N/D", "Charge 4", "Charge reçue", "Charge 1", "Charge 2", "Charge 3", "P. Suivant", "Potentiel de segments restants", "N/D", "N/D"),
-        'initial': [   48,                 0,                                 0,            0,     0,     -32768,              0,     -32768,     -32768,     -32768,   '*prt_z+1',                                3,     0,     0],
-        'tailles': (    1,                 1,                                 2,            1,     1,          2,              2,          2,          2,          2,                                   6,                                1,     1,     8)
+        'textes': ("Code", "Tempo évolution", "Potentiel synaptique disponible", "Niveau TAC", "Rétro-activité", "Nombre de charges", "N/D", "Charge reçue", "Charge 1", "Charge 2", "Charge 3", "P. Suivant", "U. Suivant", "Potentiel de segments restants", "N/D"),
+        'initial': [  202,                 0,                                 0,            0,                0,                   0,     0,              0,     -32768,     -32768,     -32768,   '*prt_z+1',            0,                                3,     0],
+        'tailles': (    1,                 1,                                 2,            1,                1,                   1,     1,              2,          2,          2,          2,            4,            4,                                1,     7)
     },
     'NEURONE': {
         'type': 'PORTION',
         'nom': '',
         'couleur': (0,0,255),
-        'textes': ("Code", "N/D", "Niveau TAC", "N/D", "Decompte réfractaire", "Base réfractaire", "Charge reçue", "Puissance de seuil", "N/D", "Potention rayonnant", "Potentiel planaire", "Potentiel apical", "Potentiel panier", "N/D", "Potentiel axonal", "Orientation", "N/D"),
-        'initial': [  112,     0,            0,     0,                      0,                 15,              0,                    8,     0,                     0,                    0,                  0,                  0,     0,                  0,             0,     0],
-        'tailles': (    1,     3,            1,     1,                      1,                  1,              2,                    1,     1,                     1,                    1,                  1,                  1,     6,                  1,             1,     8)
+        'textes': ("Code", "N/D", "Niveau TAC", "Activité", "Decompte réfractaire", "Base réfractaire", "Charge reçue", "Puissance de seuil", "N/D", "Potention rayonnant", "Potentiel planaire", "Potentiel apical", "Potentiel panier", "N/D", "Potentiel axonal", "Orientation", "N/D"),
+        'initial': [  218,     0,            1,          0,                      0,                 15,              0,                    8,     0,                     0,                    0,                  0,                  0,     0,                  0,             0,     0],
+        'tailles': (    1,     3,            1,          1,                      1,                  1,              2,                    1,     1,                     1,                    1,                  1,                  1,     6,                  1,             1,     8)
     },
     'EXTENSION': {
         'type': 'PORTION',
         'nom': '',
         'couleur': (127,0,0),
-        'textes': ("Code", "Temporisation évolution", "N/D", "Compteur TAC", "N/D", "Valeur du bloc de boutons", "Masse du bloc de boutons", "P. Destination", "N/D", "P. Antécédante", "Potentiel axonal restant", "N/D", "N/D"),
-        'initial': [   80,                         3,     0,              2,     0,                         115,                          0,       '*prt_z+1',     0,       '*prt_z-1',                          5,     0,     0],
-        'tailles': (    1,                         1,     2,              1,     1,                           1,                          1,                                6,     2,                                6,                          1,     1,     8)
+        'textes': ("Code", "Temporisation évolution", "Activité", "Compteur TAC", "N/D", "Valeur du bloc de boutons", "Masse du bloc de boutons", "P. Destination", "U. Destination", "P. Antécédante", "U. Antécédente", "Potentiel axonal restant", "N/D"),
+        'initial': [  210,                         3,          0,              2,     0,                         115,                          0,       '*prt_z+1',                0,       '*prt_z-1',                0,                          0,     0],
+        'tailles': (    1,                         1,          2,              1,     1,                           1,                          1,                4,                4,                4,                4,                          1,     7)
     },
     'CHAINE': {
         'type': 'CHAINE',

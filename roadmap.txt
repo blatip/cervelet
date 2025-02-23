@@ -1,30 +1,26 @@
-Ce projet a pour objectif de créer un programme imitant le fonctionnement d'un cerveau par la modélisation extrêmement simplifiée des neurones, de leur développement, de leur fonctionnement, et de leurs interactions. Ce programme est codé en assembleur NASM x64. Au jour de la publication, son interface fait appel aux librairies Windows de Microsoft.
-Deux particularités sont envisagées :
-- intégration de mécanismes de rétroaction intrinsèque qui mettent en place la pondération des entrées (qui est à la base du fonctionnement des IA modernes), ainsi qu'une selection naturelle des sorties utiles
-- la distribution du fonctionnement du modele sur plusieurs ordinateurs en réseau local (considérant les faibles capacités de traitement des ordinateurs personnels au regard du fonctionnement d'un cerveau humain)
+Ce projet a pour objectif de créer un programme imitant le fonctionnement d'un cerveau par la modélisation extrêmement simplifiée des neurones, de leur développement, de leur fonctionnement, et de leurs interactions. Ce programme n'est plus codé en assembleur NASM x64, mais en c, et intégrera bientôt des portions cuda. Au jour de la publication, son interface fait appel aux librairies Windows de Microsoft.
+Plusieurs particularités sont envisagées :
+- intégration de mécanismes de rétroaction intrinsèque qui mettent en place la pondération des entrées
+- selection naturelle des sorties utiles
+- traitement des portions sur carte graphique nvidia
+- distribution du fonctionnement du modele sur plusieurs ordinateurs en réseau local 
+- création de la structure de cerveau sur une application séparée
 
 ############################# EN COURS
-- routines de développement
-	segments dendritiques / neurones / extensions axonales
-- routines de création de réseaux complexes
-- tests de reseaux neuronaux en quantité
-	fonctionnement / visualisation / rapidité
+- traitement en réseau
+- codage traitement portions en cuda
 
 ############################# A VENIR
+- routines de développement
+	segments dendritiques / neurones / extensions axonales
 - action sur le défilement du texte / environnement
 - sortie (interne) visualisable
-
-- Mise en réseau
-	- recodage en C pour portabilité (+ optimisation compilateur)
-	- codage interfacage reseau
-	- interfacage entre processeurs différents
-	- découpage du cerveau en zones
-
-
-
+- découpage du cerveau en zones
 
 ############################# FAIT
 
+- recodage en c
+- outil de creation en python
 - boucle principale
 - interface graphique
 - structure des neurones

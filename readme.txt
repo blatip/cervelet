@@ -2,7 +2,7 @@
 
 ##### French version below.
 
-This project aims to create a program that mimics the functioning of a brain through an extremely simplified modeling of neurons, their development, their operations, and their interactions. This program is coded in x64 NASM assembly language. As of the publication date, its interface uses Microsoft's Windows libraries.
+This project aims to create a program that mimics the functioning of a brain through an extremely simplified modeling of neurons, their development, their operations, and their interactions. This program is coded in c language. As of the publication date, its interface uses Microsoft's Windows libraries.
 
 ## License
 
@@ -26,7 +26,7 @@ This project was created and is maintained by Philippe BLATIERE (blatiere@blatie
 
 ##### French version
 
-Ce projet a pour objectif de créer un programme imitant le fonctionnement d'un cerveau par la modélisation extrêmement simplifiée des neurones, de leur développement, de leur fonctionnement, et de leurs interactions. Ce programme est codé en assembleur NASM x64. Au jour de la publication, son interface fait appel aux librairies Windows de Microsoft.
+Ce projet a pour objectif de créer un programme imitant le fonctionnement d'un cerveau par la modélisation extrêmement simplifiée des neurones, de leur développement, de leur fonctionnement, et de leurs interactions. Ce programme est codé en c. Au jour de la publication, son interface fait appel aux librairies Windows de Microsoft.
 
 ## Licence
 

@@ -1,0 +1,102 @@
+cd C:\Assemblage\cervelet
+gcc cervelet.c -o cervelet -lgdi32 -lws2_32
+cervelet.exe
+
+gcc -O3 -march=native -funroll-loops -fomit-frame-pointer cervelet.c -o cervelet -lgdi32
+
+-march=native : optimiser le code pour l'architecture du processeur actuel (risque : incompatibilités)
+-funroll-loops : dérouler les boucles (risque : grosse taille du binaire)
+-fstrict-aliasing : optimisations basées sur les règles d'alias strictes (risque : bugs subtils)
+-fomit-frame-pointer : ne pas conserver le pointeur de cadre (risque : difficulté à débugger)
+-ffast-math : optimisation des calculs en virgule flottante (risque : perte de précision)
+
+py transform.py
+
+udp && ip.src == 192.168.1.124 && ip.dst == 192.168.1.1
+
+===============================================
+
+VARIABLES
+1 octet
+	p : unsigned char
+	r : signed char
+	f : -
+2 octets
+	p : unsigned short
+	r : short
+	f : -
+2/4 octets
+	p : unsigned int
+	r : int
+	f : -
+4 octets
+	p : unsigned long
+	r : long
+	f : float
+8 octets
+	p : unsigned long long
+	r : long long
+	f : double
+10 octets
+	p : -
+	r : -
+	f : long double
+
+PRE PROCESS
+	#include
+	#define
+
+POINTEURS
+	variable
+	&variable = adresse de "variable"
+			= valeur pointeur de la variable
+	
+	pointeur
+	*pointeur = valeur à l'adresse "pointeur"
+			= valeur variable pointée
+
+SPECIAL :
+	const : ... constante, nulle part
+	register int ... : dans registre
+	volative int ... : dans RAM
+	pour cast : (...)
+
+FORMATAGE
+	%d : entier
+	%f : flottant
+	%c : caractere
+	%s : chaine
+	%p : adresse
+	
+MOTS RESERVES
+auto
+break
+case
+char
+const
+default
+do
+double
+else
+enum
+extern
+float
+for
+goto
+if
+int
+long
+register
+return
+short
+signed
+sizeof
+static
+struct
+switch
+typedef
+union
+unsigned
+void
+volatile
+while
