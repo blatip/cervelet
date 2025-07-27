@@ -1,0 +1,59 @@
+﻿C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\Microsoft.CppBuild.targets(531,5): warning MSB8028: Le répertoire intermédiaire (x64\Release\) contient des fichiers partagés provenant d'un autre projet (moteur.vcxproj). Cela peut entraîner un comportement de nettoyage et de regénération incorrect.
+  cervelet.c
+C:\cervelet\moteur\cervelet.c(609,12): warning C4477: 'printf' : la chaîne de format '%d' nécessite un argument de type 'int', mais l'argument variadique 1 est de type 'unsigned __int64'
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%lld' dans la chaîne de format
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%Id' dans la chaîne de format
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%I64d' dans la chaîne de format
+  
+C:\cervelet\moteur\cervelet.c(609,12): warning C4477: 'printf' : la chaîne de format '%d' nécessite un argument de type 'int', mais l'argument variadique 2 est de type 'unsigned __int64'
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%lld' dans la chaîne de format
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%Id' dans la chaîne de format
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%I64d' dans la chaîne de format
+  
+C:\cervelet\moteur\cervelet.c(609,12): warning C4477: 'printf' : la chaîne de format '%d' nécessite un argument de type 'int', mais l'argument variadique 3 est de type 'unsigned __int64'
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%lld' dans la chaîne de format
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%Id' dans la chaîne de format
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%I64d' dans la chaîne de format
+  
+C:\cervelet\moteur\cervelet.c(609,12): warning C4477: 'printf' : la chaîne de format '%d' nécessite un argument de type 'int', mais l'argument variadique 4 est de type 'unsigned __int64'
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%lld' dans la chaîne de format
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%Id' dans la chaîne de format
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%I64d' dans la chaîne de format
+  
+C:\cervelet\moteur\cervelet.c(609,12): warning C4477: 'printf' : la chaîne de format '%d' nécessite un argument de type 'int', mais l'argument variadique 5 est de type 'unsigned __int64'
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%lld' dans la chaîne de format
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%Id' dans la chaîne de format
+      C:\cervelet\moteur\cervelet.c(609,12):
+      utilisez '%I64d' dans la chaîne de format
+  
+C:\cervelet\moteur\cervelet.c(1067,13): warning C4102: 'messagesLoop' : étiquette non référencée
+C:\cervelet\moteur\cervelet.c(2414,41): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\moteur\cervelet.c(2418,39): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\moteur\cervelet.c(2713,63): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\moteur\cervelet.c(2732,53): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\moteur\cervelet.c(2736,59): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\moteur\cervelet.c(2615,18): warning C4101: 'nombreDeMessages' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(2609,15): warning C4101: 'receiveWaitResult' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(2607,13): warning C4101: 'longueurALire' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(2608,15): warning C4101: 'waitTime' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(2604,18): warning C4101: 'userDestinataire' : variable locale non référencée
+  Génération de code en cours
+  2 of 36 functions ( 5.6%) were compiled, the rest were copied from previous compilation.
+    0 functions were new in current compilation
+    0 functions had inline decision re-evaluated but remain unchanged
+  Fin de la génération du code
+  moteur.vcxproj -> C:\cervelet\x64\Release\cervelet.exe

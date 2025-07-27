@@ -1,0 +1,12 @@
+﻿  cervelet.c
+C:\cervelet\cerveluda\cervelet.c(1091,26): warning C4996: 'WSASocketA': Use WSASocketW() instead or define _WINSOCK_DEPRECATED_NO_WARNINGS to disable deprecated API warnings
+C:\cervelet\cerveluda\cervelet.c(2397,17): warning C4098: 'ecrire_messages_console' : fonction 'void' retournant une valeur
+C:\cervelet\cerveluda\cervelet.c(3270,33): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\cerveluda\cervelet.c(3274,31): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\cerveluda\cervelet.c(3327,89): warning C4244: '=' : conversion de 'uint64_t' en 'uint8_t', perte possible de données
+C:\cervelet\cerveluda\cervelet.c(3348,33): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\cerveluda\cervelet.c(3565,13): warning C4101: 'chargeD32' : variable locale non référencée
+C:\cervelet\cerveluda\cervelet.c(3564,13): warning C4101: 'chargeD16' : variable locale non référencée
+C:\cervelet\cerveluda\cervelet.c(3559,9): warning C4101: 'numeroDePaquet' : variable locale non référencée
+C:\cervelet\cerveluda\cervelet.c(2049,1): warning C4715: 'doApplicate' : les chemins de contrôle ne retournent pas tous une valeur
+  cerveluda.vcxproj -> C:\cervelet\x64\Debug\cerveluda.exe

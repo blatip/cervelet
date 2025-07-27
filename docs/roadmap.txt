@@ -7,18 +7,17 @@ Plusieurs particularités sont envisagées :
 - création de la structure de cerveau sur une application séparée
 
 ############################# EN COURS
-- traitement en réseau
-- codage traitement portions en cuda
+- traitement en réseau : FAIT, mais des problèmes de synchronisation me mènent à changer le traitement des portions
+- codage traitement portions en cuda : préparé mais en attente de récolution des problèmes de synchronisation
 
 ############################# A VENIR
-- routines de développement
-	segments dendritiques / neurones / extensions axonales
+- routines de développement segments dendritiques / neurones / extensions axonales
 - action sur le défilement du texte / environnement
 - sortie (interne) visualisable
 - découpage du cerveau en zones
 
 ############################# FAIT
-
+- mécanisme de messages / notes pour traitement en réseau
 - recodage en c
 - outil de creation en python
 - boucle principale

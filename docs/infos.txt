@@ -10,9 +10,9 @@ gcc -O3 -march=native -funroll-loops -fomit-frame-pointer cervelet.c -o cervelet
 -fomit-frame-pointer : ne pas conserver le pointeur de cadre (risque : difficulté à débugger)
 -ffast-math : optimisation des calculs en virgule flottante (risque : perte de précision)
 
-py transform.py
-
 udp && ip.src == 192.168.1.124 && ip.dst == 192.168.1.1
+
+udp && ip.dst == 192.168.1.124
 
 ===============================================
 

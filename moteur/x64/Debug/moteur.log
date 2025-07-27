@@ -1,0 +1,17 @@
+﻿C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\Microsoft.CppBuild.targets(534,5): warning MSB8028: Le répertoire intermédiaire (x64\Debug\) contient des fichiers partagés provenant d'un autre projet (cervelet.vcxproj). Cela peut entraîner un comportement de nettoyage et de regénération incorrect.
+  cervelet.c
+C:\cervelet\moteur\cervelet.c(2172,21): warning C4098: 'ecrire_messages_console' : fonction 'void' retournant une valeur
+C:\cervelet\moteur\cervelet.c(2685,17): warning C4101: 'activAntec8' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(2686,17): warning C4101: 'chargeD32' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(2690,17): warning C4101: 'nivActivDest' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(2691,17): warning C4101: 'masblocb8' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(2687,17): warning C4101: 'comptAct8' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(2688,17): warning C4101: 'actDest8' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(2689,16): warning C4101: 'valblocb8' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(3098,37): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\moteur\cervelet.c(3102,35): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\moteur\cervelet.c(3174,37): warning C4018: '<' : incompatibilité signed/unsigned
+C:\cervelet\moteur\cervelet.c(3349,17): warning C4101: 'chargeD32' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(3348,17): warning C4101: 'chargeD16' : variable locale non référencée
+C:\cervelet\moteur\cervelet.c(3343,13): warning C4101: 'numeroDePaquet' : variable locale non référencée
+  moteur.vcxproj -> C:\cervelet\x64\Debug\moteur.exe
